@@ -4,6 +4,28 @@
 
 The repository is intentionally organized as a staged robotics research codebase. The first milestone is a reproducible replay pipeline with a fixed-resolution 2.5D baseline and Rerun visualization. Adaptive horizontal cells, semantic uncertainty, dynamic-object likelihood, vertical slices, predictive dilation, and ROS 2 integration are added incrementally.
 
+## Installation without a virtual environment
+
+The project supports Python 3.10 and newer. For a direct system installation, use the same interpreter for both pip and the demo:
+
+```bash
+python3 --version
+python3 -m pip install -e .
+```
+
+If Debian or Ubuntu reports an `externally-managed-environment` error, use the distribution override explicitly:
+
+```bash
+python3 -m pip install --break-system-packages -e .
+```
+
+On systems where `python3` is Python 3.10, this resolves the package requirement. If the `rerun-sdk` wheel is unavailable for the platform, install the demo dependencies separately and run the smoke test without Rerun:
+
+```bash
+python3 -m pip install --break-system-packages numpy pyyaml
+python3 scripts/run_replay.py --frames 10 --no-rerun
+```
+
 ## Architecture
 
 ```text

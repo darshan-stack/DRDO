@@ -25,7 +25,7 @@ def main() -> None:
     use_rr = rr is not None and not args.no_rerun
     if use_rr:
         rr.init('ffem-lidar-mapping', spawn=True)
-        rr.set_time_sequence('frame', 0)
+        rr.set_time('frame', sequence=0)
 
     rng = np.random.default_rng(7)
     for frame_idx in range(args.frames):
@@ -42,12 +42,12 @@ def main() -> None:
         colours[moving] = [230, 70, 60]
 
         if use_rr:
-            rr.set_time_sequence('frame', frame_idx)
+            rr.set_time('frame', sequence=frame_idx)
             rr.log('world/lidar/raw', rr.Points3D(points, colors=colours))
             rr.log('world/dynamics/moving_points', rr.Points3D(points[moving], colors=[240, 60, 50]))
             rr.log('world/robot/trajectory', rr.LineStrips3D([[[0, 0, 0], [0.12 * frame_idx, 0, 0]]]))
-            rr.log('metrics/latency', rr.Scalars({'pipeline_ms': 3.0 + 0.02 * int(moving.sum())}))
-            rr.log('metrics/memory', rr.Scalars({'active_cells': 2500 + 4 * int(moving.sum())}))
+            rr.log('metrics/latency/pipeline_ms', rr.Scalars([3.0 + 0.02 * int(moving.sum())]))
+            rr.log('metrics/memory/active_cells', rr.Scalars([2500 + 4 * int(moving.sum())]))
 
     if use_rr:
         Path(args.recording).parent.mkdir(parents=True, exist_ok=True)

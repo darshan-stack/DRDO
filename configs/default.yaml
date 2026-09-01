@@ -1,0 +1,43 @@
+experiment:
+  name: ffem_demo
+  seed: 7
+  frames: 100
+  enable_rerun: true
+  output_recording: outputs/ffem_demo.rrd
+
+sensor:
+  frame_rate_hz: 10
+  max_range_m: 80.0
+  horizontal_resolution_m: 0.50
+  vertical_resolution_m: 0.25
+
+mapping:
+  base_cell_size_m: 1.0
+  finest_cell_size_m: 0.25
+  max_level: 2
+  min_observations_for_slice: 8
+  slice_separation_m: 0.35
+  elevation_variance_limit: 0.25
+
+adaptation:
+  mode: ffem
+  semantic_weight: 0.30
+  motion_weight: 0.30
+  traversability_weight: 0.20
+  geometry_weight: 0.15
+  range_weight: 0.05
+  refine_threshold: 0.60
+  merge_threshold: 0.25
+  dwell_frames: 5
+  max_topology_changes_per_frame: 32
+  max_active_cells: 20000
+  predictive_dilation_frames: 2
+
+visualization:
+  application_id: ffem-lidar-mapping
+  log_raw_points: true
+  log_semantics: true
+  log_dynamics: true
+  log_elevation: true
+  log_adaptive_cells: true
+  log_metrics: true

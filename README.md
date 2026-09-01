@@ -77,3 +77,34 @@ Large datasets and model checkpoints are excluded from Git. Place them under `da
 ## Git workflow
 
 Create a feature branch for each experiment or subsystem. Every commit should include tests or a reproducible example. Keep generated `.rrd` recordings and figures under `outputs/` locally unless a small artifact is intentionally selected for version control.
+
+## Current implementation status
+
+The repository now includes a runnable 70%-ready prototype core in `src/ffem/pipeline.py`. It provides deterministic synthetic LiDAR replay, semantic probability channels, moving-point probability, elevation mean/variance fusion, traversability cost, attention scoring, adaptive cell levels, temporal hysteresis, vertical slices for multimodal heights, topology-change limits, and metrics. The perception outputs are deliberately mock backends and must later be replaced with trained LiDAR models.
+
+Run the real-time Rerun demo directly on the system Python:
+
+```bash
+python3 -m pip install --break-system-packages -e .
+python3 scripts/run_replay.py --frames 300 --recording outputs/ffem_demo.rrd
+```
+
+Run a headless smoke test:
+
+```bash
+python3 scripts/run_replay.py --frames 100 --no-rerun
+python3 -m pytest tests/unit -q
+```
+
+The ROS 2 adapter is under `ros2/`. On a sourced ROS 2 installation, build it with:
+
+```bash
+cd ros2
+python3 -m pip install --break-system-packages -e .
+# or use colcon from the parent workspace:
+# colcon build --packages-select ffem_lidar_mapping
+# source install/setup.bash
+# ros2 launch ffem_lidar_mapping ffem.launch.py
+```
+
+The current ROS 2 callback is an integration adapter and uses the core pipeline; PointCloud2 decoding and publication should be completed in the next milestone. This keeps the research core testable on machines without ROS 2.

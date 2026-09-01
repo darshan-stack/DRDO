@@ -1,61 +1,55 @@
 #!/usr/bin/env python3
-"""Run the dependency-light FFEM demo replay.
-
-This first milestone intentionally uses deterministic mock observations. Replace
-these adapters with real LiDAR, semantic, and MOS backends in later stages.
-"""
+"""Run the end-to-end FFEM synthetic real-time demo."""
 from __future__ import annotations
 import argparse
 from pathlib import Path
 import numpy as np
+from ffem.pipeline import FFEMPipeline, FFEMConfig
 
 try:
     import rerun as rr
-except ImportError:  # pragma: no cover
+except ImportError:
     rr = None
 
 
+def log_frame(result: dict, pipeline: FFEMPipeline, frame: int) -> None:
+    if rr is None: return
+    points, moving, probs, stats = result['points'], result['moving'], result['semantic_probs'], result['stats']
+    map_points, map_colors, levels = pipeline.mapping.arrays()
+    rr.set_time('frame', sequence=frame)
+    colors = np.zeros((len(points), 3), dtype=np.uint8); colors[:] = [80, 140, 220]; colors[moving] = [235, 65, 55]
+    rr.log('world/lidar/raw', rr.Points3D(points, colors=colors))
+    rr.log('world/dynamics/moving_points', rr.Points3D(points[moving], colors=[245, 60, 50]))
+    rr.log('world/map/elevation', rr.Points3D(map_points, colors=map_colors))
+    if len(map_points):
+        rr.log('world/map/adaptive_cells', rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))
+    if pipeline.mapping.events:
+        ev = pipeline.mapping.events[-min(20, len(pipeline.mapping.events)):]
+        event_pts = np.array([[e['cell'][0], e['cell'][1], 0.04] for e in ev], dtype=np.float32)
+        rr.log('world/adaptation/refinement_events', rr.Points3D(event_pts, colors=[245, 190, 40], radii=0.08))
+    rr.log('world/robot/trajectory', rr.LineStrips3D([[[0.12 * frame, 0, 0], [0.12 * frame + 0.1, 0, 0]]]))
+    rr.log('metrics/latency/total_ms', rr.Scalars([stats['total_ms']]))
+    rr.log('metrics/latency/map_ms', rr.Scalars([stats['map_ms']]))
+    rr.log('metrics/memory/active_cells', rr.Scalars([stats['active_cells']]))
+    rr.log('metrics/topology_changes', rr.Scalars([stats['topology_changes']]))
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--frames', type=int, default=100)
-    parser.add_argument('--recording', default='outputs/ffem_demo.rrd')
-    parser.add_argument('--no-rerun', action='store_true')
-    args = parser.parse_args()
-
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--frames', type=int, default=300)
+    ap.add_argument('--recording', default='outputs/ffem_demo.rrd')
+    ap.add_argument('--no-rerun', action='store_true')
+    ap.add_argument('--seed', type=int, default=7)
+    args = ap.parse_args()
     use_rr = rr is not None and not args.no_rerun
+    if use_rr: rr.init('ffem-lidar-mapping', spawn=True); rr.set_time('frame', sequence=0)
+    pipeline = FFEMPipeline(FFEMConfig(), seed=args.seed)
+    for frame in range(args.frames):
+        result = pipeline.step(frame)
+        log_frame(result, pipeline, frame)
+        if frame % 25 == 0: print(f"frame={frame:04d} total_ms={result['stats']['total_ms']:.2f} cells={result['stats']['active_cells']} changes={result['stats']['topology_changes']}")
     if use_rr:
-        rr.init('ffem-lidar-mapping', spawn=True)
-        rr.set_time('frame', sequence=0)
+        Path(args.recording).parent.mkdir(parents=True, exist_ok=True); rr.save(args.recording); print(f'Saved Rerun recording to {args.recording}')
+    else: print(f'Completed {args.frames} frames without Rerun logging')
 
-    rng = np.random.default_rng(7)
-    for frame_idx in range(args.frames):
-        theta = rng.uniform(-np.pi, np.pi, 1500)
-        radius = rng.uniform(2.0, 45.0, 1500)
-        x = radius * np.cos(theta)
-        y = radius * np.sin(theta)
-        z = 0.04 * np.sin(x / 4.0) + 0.03 * np.cos(y / 3.0)
-        points = np.column_stack((x, y, z))
-        moving = ((x - 8.0 - 0.12 * frame_idx) ** 2 + (y - 2.0) ** 2) < 3.0
-        z[moving] += 1.0
-        colours = np.zeros((len(points), 3), dtype=np.uint8)
-        colours[:] = [90, 140, 220]
-        colours[moving] = [230, 70, 60]
-
-        if use_rr:
-            rr.set_time('frame', sequence=frame_idx)
-            rr.log('world/lidar/raw', rr.Points3D(points, colors=colours))
-            rr.log('world/dynamics/moving_points', rr.Points3D(points[moving], colors=[240, 60, 50]))
-            rr.log('world/robot/trajectory', rr.LineStrips3D([[[0, 0, 0], [0.12 * frame_idx, 0, 0]]]))
-            rr.log('metrics/latency/pipeline_ms', rr.Scalars([3.0 + 0.02 * int(moving.sum())]))
-            rr.log('metrics/memory/active_cells', rr.Scalars([2500 + 4 * int(moving.sum())]))
-
-    if use_rr:
-        Path(args.recording).parent.mkdir(parents=True, exist_ok=True)
-        rr.save(args.recording)
-        print(f'Saved Rerun recording to {args.recording}')
-    else:
-        print(f'Completed {args.frames} frames without Rerun logging')
-
-
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()

@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ffem_lidar_mapping</name>
+  <version>0.1.0</version>
+  <description>Feedback-Foveated Elevation Mapping research prototype.</description>
+  <maintainer email="research@example.com">FFEM Research Team</maintainer>
+  <license>Apache-2.0</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+</package>

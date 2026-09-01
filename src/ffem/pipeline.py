@@ -133,7 +133,18 @@ class FFEMPipeline:
         self.config = config or FFEMConfig(); self.sensor=SyntheticLidar(seed); self.perception=MockPerception(self.config.num_classes); self.mapping=AdaptiveElevationMap(self.config)
         self.history: list[dict[str, float]]=[]
 
+    def process_points(self, points: np.ndarray, intensity: np.ndarray | None = None, motion: np.ndarray | None = None, frame: int = 0) -> dict[str, Any]:
+        t0 = time.perf_counter()
+        points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+        intensity = np.zeros(len(points), dtype=np.float32) if intensity is None else np.asarray(intensity, dtype=np.float32)
+        motion = np.zeros(len(points), dtype=np.float32) if motion is None else np.asarray(motion, dtype=np.float32)
+        probs, inferred_motion = self.perception.infer(points, motion > 0.5, intensity)
+        motion = np.maximum(motion, inferred_motion)
+        stats = self.mapping.update(points, probs, motion, frame)
+        stats.update({'frame': frame, 'total_ms': (time.perf_counter()-t0)*1000, 'points': len(points), 'moving_points': int((motion > 0.5).sum())})
+        self.history.append(stats)
+        return {'points': points, 'intensity': intensity, 'moving': motion > 0.5, 'motion_probability': motion, 'semantic_probs': probs, 'stats': stats}
+
     def step(self, frame: int) -> dict[str, Any]:
-        t0=time.perf_counter(); points,intensity,moving=self.sensor.frame(frame); probs,motion=self.perception.infer(points,moving,intensity); stats=self.mapping.update(points,probs,motion,frame)
-        stats.update({'frame': frame, 'total_ms': (time.perf_counter()-t0)*1000, 'points': len(points), 'moving_points': int(moving.sum())})
-        self.history.append(stats); return {'points':points,'intensity':intensity,'moving':moving,'semantic_probs':probs,'stats':stats}
+        points, intensity, moving = self.sensor.frame(frame)
+        return self.process_points(points, intensity, moving.astype(np.float32), frame)

@@ -108,3 +108,31 @@ python3 -m pip install --break-system-packages -e .
 ```
 
 The current ROS 2 callback is an integration adapter and uses the core pipeline; PointCloud2 decoding and publication should be completed in the next milestone. This keeps the research core testable on machines without ROS 2.
+
+## Integrated CARLA–ROS 2–FFEM–Rerun workflow
+
+The main integration path is now represented in the repository:
+
+```text
+CARLA -> CARLA ROS bridge -> PointCloud2 -> FFEM ROS 2 node -> TF transform -> FFEM map
+                                                   |-> RViz2 topics
+                                                   |-> optional Rerun logger -> .rrd
+```
+
+The FFEM node now attempts a timestamped TF lookup from the LiDAR message frame into `map`, processes the actual decoded points, publishes elevation and moving-point clouds, publishes metrics and refinement events, and can optionally log the same data to Rerun. The standalone logger is useful when the mapper should remain independent of visualization.
+
+The CARLA integration assets are under `sim/carla/`. They include `config.yaml`, a synchronous scenario runner, and a complete run guide. The external CARLA server, CARLA Python API, official CARLA ROS bridge, ROS 2 distribution, and RViz2 remain environment dependencies and are not bundled in this repository.
+
+```bash
+# after CARLA and the official bridge are installed and sourced
+ros2 launch carla_ros_bridge carla_ros_bridge.launch.py synchronous_mode:=True fixed_delta_seconds:=0.05
+python3 sim/carla/run_scenario.py --map Town03 --vehicles 20 --ticks 1000
+ros2 launch ffem_lidar_mapping ffem_integrated.launch.py input_topic:=/carla/ego_vehicle/lidar map_frame:=map
+rviz2
+```
+
+For a real CARLA experiment, ordinary LiDAR must be used as the FFEM input. CARLA semantic LiDAR or actor state should be connected only to a separate evaluation node as ground truth; it must not replace the deployed perception input.
+
+## Integration limitations
+
+The integrated path is now connected at the transport and processing level, but model perception remains deterministic mock logic, the CARLA bridge is an external dependency, and the FFEM map output is currently encoded as XYZ point clouds rather than a custom semantic/elevation message. The next production milestone is real TF validation against the target LiDAR driver, a trained semantic/MOS adapter, object tracking, and ground-truth evaluation on CARLA scenarios.

@@ -12,5 +12,5 @@ setup(
         ('share/' + package_name + '/launch', glob('launch/*.py')),
     ],
     install_requires=['setuptools'],
-    entry_points={'console_scripts': ['ffem_node = ffem_lidar_mapping.node:main']},
+    entry_points={'console_scripts': ['ffem_node = ffem_lidar_mapping.node:main', 'ffem_rerun_logger = ffem_lidar_mapping.rerun_logger:main']},
 )

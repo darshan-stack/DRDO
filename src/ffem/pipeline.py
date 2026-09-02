@@ -10,6 +10,7 @@ from typing import Any
 import time
 import numpy as np
 from ffem.perception.motion import VoxelMotionDetector, CentroidTracker
+from ffem.mapping.radial_resolution import RadialResolutionPolicy
 
 @dataclass
 class FFEMConfig:
@@ -31,7 +32,7 @@ class FFEMConfig:
 
 @dataclass
 class Cell:
-    key: tuple[int, int]
+    key: tuple[int, int, int]
     level: int = 0
     count: int = 0
     elevation: float = 0.0
@@ -41,11 +42,12 @@ class Cell:
     traversability: float = 0.0
     attention: float = 0.0
     quiet_frames: int = 0
+    size_m: float = 1.0
     slices: list[dict[str, float]] = field(default_factory=list)
 
     @property
     def size(self) -> float:
-        return 1.0 / (2 ** self.level)
+        return self.size_m / (2 ** self.level)
 
 class SyntheticLidar:
     def __init__(self, seed: int = 7):
@@ -79,15 +81,18 @@ class MockPerception:
 class AdaptiveElevationMap:
     def __init__(self, config: FFEMConfig):
         self.cfg = config
-        self.cells: dict[tuple[int, int], Cell] = {}
+        self.cells: dict[tuple[int, int, int], Cell] = {}
+        self.radial = RadialResolutionPolicy()
         self.events: list[dict[str, Any]] = []
 
-    def _key(self, x: float, y: float, level: int = 0) -> tuple[int, int]:
-        size = self.cfg.base_cell_size / (2 ** level)
-        return int(np.floor(x / size)), int(np.floor(y / size))
+    def _key(self, x: float, y: float, level: int = 0) -> tuple[int, int, int]:
+        radius = float(np.hypot(x, y))
+        band = next((i for i, b in enumerate(self.radial.bands) if radius <= b.max_radius_m), len(self.radial.bands) - 1)
+        size = self.radial.bands[band].cell_size_m / (2 ** level)
+        return band, int(np.floor(x / size)), int(np.floor(y / size))
+    def _cell(self, key: tuple[int, int, int], level: int = 0) -> Cell:
+        if key not in self.cells: self.cells[key] = Cell(key=key, level=level, size_m=self.radial.bands[key[0]].cell_size_m, semantic_probs=np.ones(self.cfg.num_classes) / self.cfg.num_classes)
 
-    def _cell(self, key: tuple[int, int], level: int = 0) -> Cell:
-        if key not in self.cells: self.cells[key] = Cell(key=key, level=level, semantic_probs=np.ones(self.cfg.num_classes) / self.cfg.num_classes)
         return self.cells[key]
 
     def update(self, points: np.ndarray, semantic_probs: np.ndarray, motion: np.ndarray, frame: int) -> dict[str, float]:
@@ -101,7 +106,7 @@ class AdaptiveElevationMap:
             c.motion_probability = float(0.80 * c.motion_probability + 0.20 * np.mean(motion[inds]))
             c.traversability = float(np.clip(3.0 * np.sqrt(c.variance + 1e-6) + abs(c.elevation - old), 0, 1))
             entropy = float(-np.sum(c.semantic_probs * np.log(c.semantic_probs + 1e-8)) / np.log(self.cfg.num_classes))
-            c.attention = float(np.clip(self.cfg.semantic_weight * entropy + self.cfg.motion_weight * c.motion_probability + self.cfg.traversability_weight * c.traversability + self.cfg.geometry_weight * min(1, 4*c.variance) + self.cfg.range_weight * min(1, np.hypot(*key) / 50), 0, 1))
+            c.attention = float(np.clip(self.cfg.semantic_weight * entropy + self.cfg.motion_weight * c.motion_probability + self.cfg.traversability_weight * c.traversability + self.cfg.geometry_weight * min(1, 4*c.variance) + self.cfg.range_weight * min(1, np.hypot(key[1] * c.size, key[2] * c.size) / 50), 0, 1))
             if len(inds) >= 8 and c.variance > 0.04 and not c.slices:
                 c.slices = [{'height': float(np.min(z)), 'support': float(np.sum(z < np.mean(z)) / len(z))}, {'height': float(np.max(z)), 'support': float(np.sum(z >= np.mean(z)) / len(z))}]
         changes = 0
@@ -125,7 +130,7 @@ class AdaptiveElevationMap:
         pts=[]; colors=[]; levels=[]
         palette=np.array([[90,90,90],[70,140,220],[70,210,100],[180,120,60],[230,70,60],[220,80,180],[245,190,40]], dtype=np.uint8)
         for c in self.cells.values():
-            size=c.size; x=(c.key[0]+.5)*size; y=(c.key[1]+.5)*size
+            size=c.size; x=(c.key[1]+.5)*size; y=(c.key[2]+.5)*size
             pts.append([x,y,c.elevation]); colors.append(palette[int(np.argmax(c.semantic_probs))]); levels.append(c.level)
         return np.asarray(pts), np.asarray(colors), np.asarray(levels)
 

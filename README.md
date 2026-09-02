@@ -136,3 +136,45 @@ For a real CARLA experiment, ordinary LiDAR must be used as the FFEM input. CARL
 ## Integration limitations
 
 The integrated path is now connected at the transport and processing level, but model perception remains deterministic mock logic, the CARLA bridge is an external dependency, and the FFEM map output is currently encoded as XYZ point clouds rather than a custom semantic/elevation message. The next production milestone is real TF validation against the target LiDAR driver, a trained semantic/MOS adapter, object tracking, and ground-truth evaluation on CARLA scenarios.
+
+## Real semantic perception backend
+
+The repository now includes a sensor-aware range-image segmentation interface in `src/ffem/perception/segmentation.py`. It provides LiDAR spherical projection, nearest-return z-buffering, a seven-class label contract, a PyTorch range-image model adapter, and an explicit fallback backend for CI only. `src/ffem/io/semantic_kitti.py` loads SemanticKITTI `.bin` and `.label` files and remaps labels into the FFEM class set. `scripts/train_segmentation.py` trains and saves a checkpoint when PyTorch is available.
+
+Install the optional ML stack with:
+
+```bash
+python3 -m pip install --break-system-packages -e ".[ml,dev]"
+```
+
+Train on labeled scans:
+
+```bash
+python3 scripts/train_segmentation.py \
+  --data-root /absolute/path/to/SemanticKITTI \
+  --sequences 00 01 02 \
+  --epochs 20 \
+  --checkpoint models/checkpoints/range_segmentation.pt
+```
+
+Run a checkpoint in replay:
+
+```bash
+python3 scripts/run_replay.py \
+  --backend torch_range \
+  --checkpoint models/checkpoints/range_segmentation.pt \
+  --frames 300 \
+  --recording outputs/semantic_demo.rrd
+```
+
+Run the same backend in ROS 2:
+
+```bash
+ros2 run ffem_lidar_mapping ffem_node --ros-args \
+  -p model_backend:=torch_range \
+  -p checkpoint:=/absolute/path/range_segmentation.pt \
+  -p input_topic:=/carla/ego_vehicle/lidar \
+  -p map_frame:=map
+```
+
+The fallback backend remains available only so the repository can be tested without a dataset, GPU, or checkpoint. It must not be used for research accuracy claims.

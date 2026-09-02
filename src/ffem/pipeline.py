@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 import time
 import numpy as np
+from ffem.perception.motion import VoxelMotionDetector, CentroidTracker
 
 @dataclass
 class FFEMConfig:
@@ -26,7 +27,7 @@ class FFEMConfig:
     traversability_weight: float = 0.20
     geometry_weight: float = 0.15
     range_weight: float = 0.05
-    num_classes: int = 4
+    num_classes: int = 7
 
 @dataclass
 class Cell:
@@ -35,7 +36,7 @@ class Cell:
     count: int = 0
     elevation: float = 0.0
     variance: float = 0.0
-    semantic_probs: np.ndarray = field(default_factory=lambda: np.ones(4) / 4)
+    semantic_probs: np.ndarray = field(default_factory=lambda: np.ones(7) / 7)
     motion_probability: float = 0.0
     traversability: float = 0.0
     attention: float = 0.0
@@ -122,26 +123,31 @@ class AdaptiveElevationMap:
     def arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if not self.cells: return np.empty((0,3)), np.empty((0,3), dtype=np.uint8), np.empty((0,))
         pts=[]; colors=[]; levels=[]
-        palette=np.array([[70,140,220],[70,210,100],[230,180,50],[230,70,60]], dtype=np.uint8)
+        palette=np.array([[90,90,90],[70,140,220],[70,210,100],[180,120,60],[230,70,60],[220,80,180],[245,190,40]], dtype=np.uint8)
         for c in self.cells.values():
             size=c.size; x=(c.key[0]+.5)*size; y=(c.key[1]+.5)*size
             pts.append([x,y,c.elevation]); colors.append(palette[int(np.argmax(c.semantic_probs))]); levels.append(c.level)
         return np.asarray(pts), np.asarray(colors), np.asarray(levels)
 
 class FFEMPipeline:
-    def __init__(self, config: FFEMConfig | None = None, seed: int = 7):
-        self.config = config or FFEMConfig(); self.sensor=SyntheticLidar(seed); self.perception=MockPerception(self.config.num_classes); self.mapping=AdaptiveElevationMap(self.config)
+    def __init__(self, config: FFEMConfig | None = None, seed: int = 7, segmenter=None, motion_detector=None, tracker=None):
+        self.config = config or FFEMConfig(); self.sensor=SyntheticLidar(seed); self.perception=MockPerception(self.config.num_classes); self.segmenter=segmenter; self.motion_detector=motion_detector or VoxelMotionDetector(); self.tracker=tracker or CentroidTracker(); self.mapping=AdaptiveElevationMap(self.config)
         self.history: list[dict[str, float]]=[]
 
     def process_points(self, points: np.ndarray, intensity: np.ndarray | None = None, motion: np.ndarray | None = None, frame: int = 0) -> dict[str, Any]:
         t0 = time.perf_counter()
         points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
         intensity = np.zeros(len(points), dtype=np.float32) if intensity is None else np.asarray(intensity, dtype=np.float32)
-        motion = np.zeros(len(points), dtype=np.float32) if motion is None else np.asarray(motion, dtype=np.float32)
-        probs, inferred_motion = self.perception.infer(points, motion > 0.5, intensity)
+        motion = self.motion_detector.detect(points) if motion is None else np.asarray(motion, dtype=np.float32)
+        if self.segmenter is not None:
+            _, probs = self.segmenter.predict(points, intensity)
+            inferred_motion = motion
+        else:
+            probs, inferred_motion = self.perception.infer(points, motion > 0.5, intensity)
         motion = np.maximum(motion, inferred_motion)
         stats = self.mapping.update(points, probs, motion, frame)
-        stats.update({'frame': frame, 'total_ms': (time.perf_counter()-t0)*1000, 'points': len(points), 'moving_points': int((motion > 0.5).sum())})
+        tracks = self.tracker.update(points, motion)
+        stats.update({'frame': frame, 'total_ms': (time.perf_counter()-t0)*1000, 'points': len(points), 'moving_points': int((motion > 0.5).sum()), 'tracks': len(tracks)})
         self.history.append(stats)
         return {'points': points, 'intensity': intensity, 'moving': motion > 0.5, 'motion_probability': motion, 'semantic_probs': probs, 'stats': stats}
 

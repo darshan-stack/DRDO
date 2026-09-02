@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 import numpy as np
 from ffem.pipeline import FFEMPipeline, FFEMConfig
+from ffem.perception.segmentation import NumpyFallbackSegmenter, TorchRangeSegmenter, ProjectionConfig
 
 try:
     import rerun as rr
@@ -40,10 +41,18 @@ def main() -> None:
     ap.add_argument('--recording', default='outputs/ffem_demo.rrd')
     ap.add_argument('--no-rerun', action='store_true')
     ap.add_argument('--seed', type=int, default=7)
+    ap.add_argument('--backend', choices=['fallback','torch_range'], default='fallback')
+    ap.add_argument('--checkpoint', default='')
     args = ap.parse_args()
     use_rr = rr is not None and not args.no_rerun
     if use_rr: rr.init('ffem-lidar-mapping', spawn=True); rr.set_time('frame', sequence=0)
-    pipeline = FFEMPipeline(FFEMConfig(), seed=args.seed)
+    cfg = FFEMConfig()
+    if args.backend == 'torch_range':
+        if not args.checkpoint: raise SystemExit('--checkpoint is required with --backend torch_range')
+        segmenter = TorchRangeSegmenter(args.checkpoint, ProjectionConfig(height=32, width=1024, max_range=80.0), num_classes=cfg.num_classes)
+    else:
+        segmenter = NumpyFallbackSegmenter(cfg.num_classes)
+    pipeline = FFEMPipeline(cfg, seed=args.seed, segmenter=segmenter)
     for frame in range(args.frames):
         result = pipeline.step(frame)
         log_frame(result, pipeline, frame)

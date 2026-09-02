@@ -33,6 +33,18 @@ adaptation:
   max_active_cells: 20000
   predictive_dilation_frames: 2
 
+perception:
+  backend: fallback
+  checkpoint: ""
+  num_classes: 7
+  range_height: 32
+  range_width: 1024
+  fov_up_deg: 10.0
+  fov_down_deg: -30.0
+  max_range_m: 80.0
+  motion_voxel_m: 0.35
+  motion_threshold_m: 0.45
+
 visualization:
   application_id: ffem-lidar-mapping
   log_raw_points: true

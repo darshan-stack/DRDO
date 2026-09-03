@@ -14,7 +14,7 @@ try:
 except ImportError:
     ROS_AVAILABLE=False
 from ffem.pipeline import FFEMPipeline, FFEMConfig
-from ffem.perception.segmentation import NumpyFallbackSegmenter, TorchRangeSegmenter, ProjectionConfig
+from ffem.perception.factory import build_segmenter
 from ffem.ros2.pointcloud2_codec import decode_pointcloud2, encode_pointcloud2
 from ffem.ros2.transforms import transform_points, transform_from_ros_transform
 try:
@@ -25,15 +25,10 @@ if ROS_AVAILABLE:
     class FFEMNode(Node):
         def __init__(self):
             super().__init__('ffem_mapper')
-            self.declare_parameter('input_topic','/points'); self.declare_parameter('map_frame','map'); self.declare_parameter('use_tf',True); self.declare_parameter('queue_depth',5); self.declare_parameter('max_points_per_frame',150000); self.declare_parameter('enable_rerun',False); self.declare_parameter('recording','outputs/ros_ffem.rrd'); self.declare_parameter('model_backend','fallback'); self.declare_parameter('checkpoint',''); self.declare_parameter('range_height',32); self.declare_parameter('range_width',1024); self.declare_parameter('max_range',80.0)
+            self.declare_parameter('input_topic','/points'); self.declare_parameter('map_frame','map'); self.declare_parameter('use_tf',True); self.declare_parameter('queue_depth',5); self.declare_parameter('max_points_per_frame',150000); self.declare_parameter('enable_rerun',False); self.declare_parameter('recording','outputs/ros_ffem.rrd'); self.declare_parameter('model_backend','auto'); self.declare_parameter('checkpoint',''); self.declare_parameter('range_height',32); self.declare_parameter('range_width',1024); self.declare_parameter('max_range',80.0)
             self.declare_parameter('map_topic','~/map/elevation'); self.declare_parameter('semantic_topic','~/map/semantic'); self.declare_parameter('moving_topic','~/map/moving_points'); self.declare_parameter('metrics_topic','~/metrics'); self.declare_parameter('events_topic','~/refinement_events')
             cfg=FFEMConfig(base_cell_size=float(self.declare_parameter('base_cell_size',1.0).value),finest_cell_size=float(self.declare_parameter('finest_cell_size',0.25).value),max_level=int(self.declare_parameter('max_level',2).value),max_active_cells=int(self.declare_parameter('max_active_cells',20000).value),max_topology_changes=int(self.declare_parameter('max_topology_changes',32).value))
-            backend=str(self.get_parameter('model_backend').value); checkpoint=str(self.get_parameter('checkpoint').value); segmenter=None
-            if backend == 'torch_range':
-                if not checkpoint: raise RuntimeError('model_backend=torch_range requires checkpoint=<path>')
-                segmenter=TorchRangeSegmenter(checkpoint, ProjectionConfig(height=int(self.get_parameter('range_height').value),width=int(self.get_parameter('range_width').value),max_range=float(self.get_parameter('max_range').value)),num_classes=cfg.num_classes)
-            elif backend == 'fallback': segmenter=NumpyFallbackSegmenter(cfg.num_classes)
-            else: raise ValueError(f'Unknown model_backend: {backend}')
+            backend=str(self.get_parameter('model_backend').value); checkpoint=str(self.get_parameter('checkpoint').value); segmenter, selected_checkpoint=build_segmenter(backend, checkpoint, cfg.num_classes, int(self.get_parameter('range_height').value), int(self.get_parameter('range_width').value), float(self.get_parameter('max_range').value))
             self.pipeline=FFEMPipeline(cfg,segmenter=segmenter); self.frame=0; self.map_frame=str(self.get_parameter('map_frame').value); self.max_points=int(self.get_parameter('max_points_per_frame').value); self.use_tf=bool(self.get_parameter('use_tf').value); self.tf_buffer=Buffer(); self.tf_listener=TransformListener(self.tf_buffer,self)
             depth=int(self.get_parameter('queue_depth').value); qos=QoSProfile(depth=depth,history=HistoryPolicy.KEEP_LAST,reliability=ReliabilityPolicy.BEST_EFFORT)
             self.sub=self.create_subscription(PointCloud2,str(self.get_parameter('input_topic').value),self.callback,qos)

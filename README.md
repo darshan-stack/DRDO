@@ -178,3 +178,42 @@ ros2 run ffem_lidar_mapping ffem_node --ros-args \
 ```
 
 The fallback backend remains available only so the repository can be tested without a dataset, GPU, or checkpoint. It must not be used for research accuracy claims.
+
+## Drop-in checkpoint workflow
+
+Place the trained checkpoint at:
+
+```text
+models/checkpoints/semantic_model.pt
+```
+
+With the default `auto` backend, both replay and ROS 2 automatically discover the first `.pt` file in that directory. You can override discovery with `FFEM_CHECKPOINT=/absolute/path/model.pt` or an explicit `--checkpoint`/`checkpoint:=...` argument. If no checkpoint exists, the system prints that it is using the fallback backend; this mode is for smoke tests only.
+
+Install the optional visualization stack:
+
+```bash
+python3 -m pip install --break-system-packages -e ".[visual]"
+```
+
+Run Open3D and Rerun together:
+
+```bash
+python3 scripts/run_replay.py --frames 300 --open3d --recording outputs/ffem_demo.rrd
+```
+
+Run with a discovered checkpoint:
+
+```bash
+python3 scripts/run_replay.py --frames 300 --open3d --recording outputs/semantic_demo.rrd
+```
+
+Run CARLA/ROS 2 with automatic discovery:
+
+```bash
+ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
+  input_topic:=/carla/ego_vehicle/lidar \
+  map_frame:=map \
+  model_backend:=auto
+```
+
+The model checkpoint must match the compact range-image architecture and seven-class output contract currently defined in `src/ffem/perception/segmentation.py`. A checkpoint from another architecture cannot be loaded automatically unless a corresponding adapter is added.

@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 import numpy as np
 from ffem.pipeline import FFEMPipeline, FFEMConfig
-from ffem.perception.segmentation import NumpyFallbackSegmenter, TorchRangeSegmenter, ProjectionConfig
+from ffem.perception.factory import build_segmenter
 
 try:
     import rerun as rr
@@ -41,24 +41,35 @@ def main() -> None:
     ap.add_argument('--recording', default='outputs/ffem_demo.rrd')
     ap.add_argument('--no-rerun', action='store_true')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--backend', choices=['fallback','torch_range'], default='fallback')
+    ap.add_argument('--backend', choices=['auto','fallback','torch_range'], default='auto')
     ap.add_argument('--checkpoint', default='')
+    ap.add_argument('--open3d', action='store_true', help='show optional Open3D live viewer')
     args = ap.parse_args()
     use_rr = rr is not None and not args.no_rerun
     if use_rr: rr.init('ffem-lidar-mapping', spawn=True); rr.set_time('frame', sequence=0)
     cfg = FFEMConfig()
-    if args.backend == 'torch_range':
-        if not args.checkpoint: raise SystemExit('--checkpoint is required with --backend torch_range')
-        segmenter = TorchRangeSegmenter(args.checkpoint, ProjectionConfig(height=32, width=1024, max_range=80.0), num_classes=cfg.num_classes)
-    else:
-        segmenter = NumpyFallbackSegmenter(cfg.num_classes)
+    segmenter, selected_checkpoint = build_segmenter(args.backend, args.checkpoint, cfg.num_classes, 32, 1024, 80.0)
+    if selected_checkpoint: print(f'using checkpoint: {selected_checkpoint}')
+    else: print('using fallback perception backend (smoke test only)')
     pipeline = FFEMPipeline(cfg, seed=args.seed, segmenter=segmenter)
+    viewer = None
+    if args.open3d:
+        from ffem.visualization.open3d_viewer import Open3DViewer
+        viewer = Open3DViewer()
     for frame in range(args.frames):
         result = pipeline.step(frame)
         log_frame(result, pipeline, frame)
+        if viewer:
+            mp, mc, levels = pipeline.mapping.arrays(); viewer.update(result, mp, mc, levels)
         if frame % 25 == 0: print(f"frame={frame:04d} total_ms={result['stats']['total_ms']:.2f} cells={result['stats']['active_cells']} changes={result['stats']['topology_changes']}")
+    if viewer:
+        viewer.close()
     if use_rr:
-        Path(args.recording).parent.mkdir(parents=True, exist_ok=True); rr.save(args.recording); print(f'Saved Rerun recording to {args.recording}')
-    else: print(f'Completed {args.frames} frames without Rerun logging')
+        parent = Path(args.recording).parent
+        parent.mkdir(parents=True, exist_ok=True)
+        rr.save(args.recording)
+        print(f'Saved Rerun recording to {args.recording}')
+    else:
+        print(f'Completed {args.frames} frames without Rerun logging')
 
 if __name__ == '__main__': main()

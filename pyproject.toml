@@ -12,6 +12,7 @@ dependencies = ["numpy>=1.26", "pyyaml>=6.0", "rerun-sdk>=0.22"]
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 ml = ["torch>=2.2"]
+visual = ["open3d>=0.18"]
 
 
 [tool.setuptools.packages.find]

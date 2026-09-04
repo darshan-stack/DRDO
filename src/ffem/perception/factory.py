@@ -6,7 +6,9 @@ from .segmentation import NumpyFallbackSegmenter, TorchRangeSegmenter, Projectio
 
 def discover_checkpoint(explicit: str = '', search_root: str = 'models/checkpoints') -> str | None:
     if explicit:
-        p=Path(explicit).expanduser(); return str(p) if p.exists() else None
+        p=Path(explicit).expanduser()
+        if not p.exists(): raise FileNotFoundError(f'Checkpoint does not exist: {p}')
+        return str(p)
     env=os.environ.get('FFEM_CHECKPOINT','')
     if env and Path(env).expanduser().exists(): return str(Path(env).expanduser())
     candidates=sorted(Path(search_root).glob('*.pt')) if Path(search_root).exists() else []

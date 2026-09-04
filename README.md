@@ -217,3 +217,22 @@ ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
 ```
 
 The model checkpoint must match the compact range-image architecture and seven-class output contract currently defined in `src/ffem/perception/segmentation.py`. A checkpoint from another architecture cannot be loaded automatically unless a corresponding adapter is added.
+
+## Supplied SemanticPOSS checkpoint
+
+The repository includes `models/checkpoints/semanticposs_first_model.pt`, which was supplied by the project owner and verified against the current seven-class compact range-image architecture. Automatic checkpoint discovery selects it when the `auto` backend is used. The checkpoint metadata reports dataset `semanticposs`, seven classes, and the expected class names: unknown, ground, vegetation, structure, vehicle, person, and obstacle.
+
+Validate the included checkpoint without a dataset scan:
+
+```bash
+python3 scripts/inspect_checkpoint.py models/checkpoints/semanticposs_first_model.pt
+python3 scripts/test_checkpoint_synthetic.py
+```
+
+Run a checkpoint-backed FFEM smoke test:
+
+```bash
+python3 scripts/run_replay.py --backend auto --frames 100 --no-rerun
+```
+
+This verifies model loading and inference integration. It is not a SemanticPOSS test-set accuracy result; those metrics require the original dataset and held-out labels.

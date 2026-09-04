@@ -50,7 +50,16 @@ class TorchRangeSegmenter(SemanticSegmenter):
         except ImportError as exc: raise RuntimeError('Install torch to use TorchRangeSegmenter.') from exc
         self.torch=torch; self.projector=RangeImageProjector(projection); self.num_classes=num_classes; self.device='cuda' if device=='auto' and torch.cuda.is_available() else device if device!='auto' else 'cpu'
         self.model=nn.Sequential(nn.Conv2d(2,32,3,padding=1),nn.ReLU(),nn.Conv2d(32,64,3,padding=1),nn.ReLU(),nn.Conv2d(64,num_classes,1)).to(self.device)
-        state=torch.load(Path(checkpoint),map_location=self.device); self.model.load_state_dict(state.get('model',state)); self.model.eval()
+        try:
+            state=torch.load(Path(checkpoint),map_location='cpu',weights_only=True)
+        except TypeError:
+            state=torch.load(Path(checkpoint),map_location='cpu')
+        if isinstance(state,dict) and 'classes' in state and int(state['classes']) != num_classes:
+            raise ValueError(f'Checkpoint has {state["classes"]} classes but FFEM expects {num_classes}')
+        if isinstance(state,dict) and 'class_names' in state and len(state['class_names']) != num_classes:
+            raise ValueError('Checkpoint class_names length does not match model output')
+        weights=state.get('model',state) if isinstance(state,dict) else state
+        self.model.load_state_dict(weights); self.model.eval()
     def predict(self,points,intensity=None):
         torch=self.torch; img=self.projector.project(points,intensity); x=np.stack([img['depth']/self.projector.cfg.max_range,img['intensity']],axis=0)[None]
         with torch.no_grad(): logits=self.model(torch.from_numpy(x).float().to(self.device))[0].cpu().numpy()

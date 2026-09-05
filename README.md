@@ -236,3 +236,13 @@ python3 scripts/run_replay.py --backend auto --frames 100 --no-rerun
 ```
 
 This verifies model loading and inference integration. It is not a SemanticPOSS test-set accuracy result; those metrics require the original dataset and held-out labels.
+
+## Preferred trained checkpoint
+
+The preferred SemanticPOSS checkpoint is now:
+
+```text
+models/checkpoints/semanticposs_range_model.pt
+```
+
+Automatic discovery prioritizes this checkpoint over the earlier `semanticposs_first_model.pt`. Both checkpoints use the same verified seven-class compact range-image architecture, but the `semanticposs_range_model.pt` file should be used for the main demonstration.

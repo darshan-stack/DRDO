@@ -11,7 +11,11 @@ def discover_checkpoint(explicit: str = '', search_root: str = 'models/checkpoin
         return str(p)
     env=os.environ.get('FFEM_CHECKPOINT','')
     if env and Path(env).expanduser().exists(): return str(Path(env).expanduser())
-    candidates=sorted(Path(search_root).glob('*.pt')) if Path(search_root).exists() else []
+    root=Path(search_root)
+    candidates=sorted(root.glob('*.pt')) if root.exists() else []
+    preferred=[root/'semanticposs_range_model.pt', root/'semantic_model.pt']
+    for p in preferred:
+        if p.exists(): return str(p)
     return str(candidates[0]) if candidates else None
 
 def build_segmenter(backend: str='auto', checkpoint: str='', num_classes: int=7, height: int=32, width: int=1024, max_range: float=80.0):

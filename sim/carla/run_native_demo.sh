@@ -12,7 +12,11 @@ CHECKPOINT="${FFEM_CHECKPOINT:-$ROOT/models/checkpoints/semanticposs_range_model
 # CARLA 0.9.16 native ROS2 uses Fast DDS. Keep every process on one domain.
 source "$ROOT/sim/carla/native_env.sh"
 source /opt/ros/humble/setup.bash
-source "$ROOT/.venv/bin/activate" 2>/dev/null || true
+if [[ -f "$ROOT/install/setup.bash" ]]; then
+  source "$ROOT/install/setup.bash"
+fi
+# The Open3D viewer imports the local ffem package directly.
+export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
 
 if ! command -v colcon >/dev/null 2>&1; then
   echo "ERROR: colcon is not installed/available. Source ROS 2 Humble first."
@@ -21,7 +25,6 @@ fi
 
 if [[ ! -x "$CARLA_PY" ]]; then
   echo "ERROR: CARLA Python environment not found: $CARLA_PY"
-  echo "Set CARLA_PY to the Python executable that imports CARLA 0.9.16."
   exit 1
 fi
 
@@ -62,12 +65,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Native CARLA example spawns the hero vehicle and sensors and stays alive.
 cd "$STACK_DIR"
 "$CARLA_PY" ros2_native.py --host 127.0.0.1 --port 2000 --file "$STACK_FILE" --verbose > "$ROOT/outputs/carla_native_ros2.log" 2>&1 &
 NATIVE_PID=$!
 
-# Wait until ROS2 can actually discover the native CARLA LiDAR publisher.
 cd "$ROOT"
 echo "Waiting for $TOPIC ..."
 for _ in $(seq 1 30); do
@@ -85,22 +86,22 @@ done
 
 if ! ros2 topic info "$TOPIC" 2>/dev/null | grep -q "Publisher count: 1"; then
   echo "ERROR: LiDAR publisher was not discovered within 30 seconds."
-  echo "Check outputs/carla_native_ros2.log and ROS2 domain/middleware settings."
+  tail -80 outputs/carla_native_ros2.log || true
   exit 1
 fi
 
 ros2 topic info "$TOPIC"
 
-# Keep the already-spawned hero moving so consecutive LiDAR frames change.
+# The native example owns the hero actor; this helper only enables autopilot.
 "$CARLA_PY" "$ROOT/sim/carla/drive_ego.py" --speed-difference=0 > "$ROOT/outputs/carla_drive.log" 2>&1 &
 DRIVE_PID=$!
 
-# Open3D uses the system ROS2 Python environment, not the CARLA-only venv.
+# Live Open3D viewer for the same real ROS2 LiDAR stream.
 python3 "$ROOT/scripts/live_open3d_ros2.py" --topic "$TOPIC" > "$ROOT/outputs/open3d_live.log" 2>&1 &
 OPEN3D_PID=$!
 
-# Run the real FFEM node in the foreground. Rerun is spawned by the node.
-exec ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
+# Real FFEM inference. The node's Rerun instance is spawned automatically.
+ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
   input_topic:="$TOPIC" \
   map_frame:=lidar \
   use_tf:=false \

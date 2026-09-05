@@ -23,7 +23,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import PointCloud2
 
-from ffem.io.pointcloud2_codec import decode_pointcloud2
+from ffem.ros2.pointcloud2_codec import decode_pointcloud2
 from ffem.perception.factory import build_segmenter
 from ffem.pipeline import FFEMConfig, FFEMPipeline
 
@@ -66,22 +66,15 @@ def capture_frames(topic: str, count: int, timeout: float) -> list[tuple[np.ndar
     try:
         while rclpy.ok() and len(node.frames) < count and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
+        frames = node.frames
     finally:
         node.destroy_node()
         rclpy.shutdown()
-    if len(node.frames) < count:
+    if len(frames) < count:
         raise RuntimeError(
-            f"Captured only {len(node.frames)}/{count} frames within {timeout:.1f}s"
+            f"Captured only {len(frames)}/{count} frames within {timeout:.1f}s"
         )
-    return node.frames
-
-
-def uniform_cell_keys(frames: list[tuple[np.ndarray, np.ndarray]], cell_size: float) -> set[tuple[int, int]]:
-    keys: set[tuple[int, int]] = set()
-    for points, _ in frames:
-        q = np.floor(points[:, :2] / cell_size).astype(np.int64)
-        keys.update(map(tuple, q.tolist()))
-    return keys
+    return frames
 
 
 def main() -> None:
@@ -119,10 +112,7 @@ def main() -> None:
 
     print("Replaying the exact captured frames through FFEM...")
     segmenter, selected = build_segmenter("torch_range", args.checkpoint, 7)
-    cfg = FFEMConfig(
-        finest_cell_size=args.uniform_cell,
-        max_active_cells=200_000,
-    )
+    cfg = FFEMConfig(max_active_cells=200_000)
     pipeline = FFEMPipeline(config=cfg, segmenter=segmenter)
 
     uniform_keys: set[tuple[int, int]] = set()
@@ -131,27 +121,20 @@ def main() -> None:
         q = np.floor(points[:, :2] / args.uniform_cell).astype(np.int64)
         uniform_keys.update(map(tuple, q.tolist()))
 
-        out = pipeline.process_points(
-            points,
-            intensity,
-            frame=frame_id,
-        )
+        out = pipeline.process_points(points, intensity, frame=frame_id)
         adaptive_cells = int(out["stats"]["active_cells"])
         uniform_cells = int(len(uniform_keys))
-        cell_reduction = 100.0 * (1.0 - adaptive_cells / uniform_cells) if uniform_cells else 0.0
-        adaptive_bytes = adaptive_cells * args.cell_bytes
-        uniform_bytes = uniform_cells * args.cell_bytes
-        memory_reduction = 100.0 * (1.0 - adaptive_bytes / uniform_bytes) if uniform_bytes else 0.0
+        reduction = 100.0 * (1.0 - adaptive_cells / uniform_cells) if uniform_cells else 0.0
         rows.append(
             {
                 "frame": frame_id,
                 "points": int(len(points)),
                 "uniform_cells": uniform_cells,
                 "adaptive_cells": adaptive_cells,
-                "uniform_bytes": uniform_bytes,
-                "adaptive_bytes": adaptive_bytes,
-                "cell_reduction_pct": cell_reduction,
-                "memory_reduction_pct": memory_reduction,
+                "uniform_bytes": uniform_cells * args.cell_bytes,
+                "adaptive_bytes": adaptive_cells * args.cell_bytes,
+                "cell_reduction_pct": reduction,
+                "memory_reduction_pct": reduction,
                 "map_ms": float(out["stats"]["map_ms"]),
                 "total_ms": float(out["stats"]["total_ms"]),
             }
@@ -159,17 +142,15 @@ def main() -> None:
         if frame_id == 1 or frame_id % 10 == 0 or frame_id == len(frames):
             print(
                 f"frame={frame_id:03d} uniform={uniform_cells} adaptive={adaptive_cells} "
-                f"reduction={cell_reduction:.2f}%"
+                f"reduction={reduction:.2f}%"
             )
 
-    uniform_final = rows[-1]["uniform_cells"]
-    adaptive_final = rows[-1]["adaptive_cells"]
-    uniform_bytes_final = int(rows[-1]["uniform_bytes"])
-    adaptive_bytes_final = int(rows[-1]["adaptive_bytes"])
+    uniform_final = int(rows[-1]["uniform_cells"])
+    adaptive_final = int(rows[-1]["adaptive_cells"])
     final_reduction = float(rows[-1]["memory_reduction_pct"])
-
     adaptive_counts = np.array([r["adaptive_cells"] for r in rows], dtype=np.float64)
     uniform_counts = np.array([r["uniform_cells"] for r in rows], dtype=np.float64)
+
     report = {
         "experiment": "uniform_vs_ffem_adaptive",
         "topic": args.topic,
@@ -180,13 +161,13 @@ def main() -> None:
         "baseline": "occupied finest XY cells accumulated from the exact same LiDAR frames",
         "memory_metric": "map-storage proxy; fixed bytes per stored cell; not whole-process RSS",
         "final": {
-            "uniform_cells": int(uniform_final),
-            "adaptive_cells": int(adaptive_final),
-            "uniform_bytes": uniform_bytes_final,
-            "adaptive_bytes": adaptive_bytes_final,
-            "cell_reduction_pct": float(100.0 * (1.0 - adaptive_final / max(uniform_final, 1))),
+            "uniform_cells": uniform_final,
+            "adaptive_cells": adaptive_final,
+            "uniform_bytes": uniform_final * args.cell_bytes,
+            "adaptive_bytes": adaptive_final * args.cell_bytes,
+            "cell_reduction_pct": final_reduction,
             "memory_reduction_pct": final_reduction,
-            "adaptive_vs_uniform_ratio": float(adaptive_final / max(uniform_final, 1)),
+            "adaptive_vs_uniform_ratio": adaptive_final / max(uniform_final, 1),
         },
         "summary": {
             "mean_uniform_cells": float(uniform_counts.mean()),
@@ -207,8 +188,8 @@ def main() -> None:
     print("\n=== RESULT ===")
     print(f"Uniform cells : {uniform_final}")
     print(f"FFEM cells    : {adaptive_final}")
-    print(f"Cell reduction: {report['final']['cell_reduction_pct']:.2f}%")
-    print(f"Memory proxy  : {report['final']['memory_reduction_pct']:.2f}%")
+    print(f"Cell reduction: {final_reduction:.2f}%")
+    print(f"Memory proxy  : {final_reduction:.2f}%")
     print(f"Saved         : {out}")
 
 

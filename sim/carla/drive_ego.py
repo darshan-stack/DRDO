@@ -4,6 +4,7 @@
 The native ROS2 stack already owns the vehicle and LiDAR. This helper does not
 spawn a second vehicle or replace the LiDAR callback. It configures CARLA
 Traffic Manager for conservative collision avoidance / lane changes and keeps
+
 the spectator camera behind the hero vehicle so the autonomous behavior is
 visible during the demo.
 
@@ -65,6 +66,26 @@ def configure_traffic_manager(tm, hero: carla.Vehicle, speed_difference: float) 
     tm.ignore_lights_percentage(hero, 0.0)
 
 
+def find_hero(world: carla.World, timeout_s: float) -> carla.Vehicle | None:
+    """Wait briefly for the native ROS2 stack to finish spawning the hero."""
+    deadline = time.monotonic() + max(timeout_s, 0.0)
+    reported = False
+    while True:
+        vehicles = list(world.get_actors().filter('vehicle.*'))
+        hero = next(
+            (v for v in vehicles if v.attributes.get('role_name') == 'hero'),
+            vehicles[0] if vehicles else None,
+        )
+        if hero is not None:
+            return hero
+        if time.monotonic() >= deadline:
+            return None
+        if not reported:
+            print('Waiting for CARLA hero vehicle from ros2_native.py ...')
+            reported = True
+        time.sleep(0.5)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--host', default='127.0.0.1')
@@ -83,20 +104,24 @@ def main() -> None:
     )
     ap.add_argument('--camera-distance', type=float, default=14.0)
     ap.add_argument('--camera-height', type=float, default=7.0)
+    ap.add_argument(
+        '--wait-for-hero',
+        type=float,
+        default=30.0,
+        help='Seconds to wait for the native ROS2 hero vehicle to appear.',
+    )
     args = ap.parse_args()
 
     client = carla.Client(args.host, args.port)
     client.set_timeout(10.0)
     world = client.get_world()
 
-    vehicles = list(world.get_actors().filter('vehicle.*'))
-    if not vehicles:
-        raise SystemExit('No vehicle found. Start ros2_native.py -f stack.json first.')
-
-    hero = next(
-        (v for v in vehicles if v.attributes.get('role_name') == 'hero'),
-        vehicles[0],
-    )
+    hero = find_hero(world, args.wait_for_hero)
+    if hero is None:
+        raise SystemExit(
+            'No CARLA hero vehicle found after waiting '
+            f'{args.wait_for_hero:.1f}s. Start ros2_native.py -f stack.json first.'
+        )
 
     tm = client.get_trafficmanager()
     configure_traffic_manager(tm, hero, args.speed_difference)

@@ -24,8 +24,6 @@ except ImportError as exc:
 
 from ffem.ros2.pointcloud2_codec import decode_pointcloud2
 
-# FFEM compact classes: unknown, ground, vegetation, structure, vehicle,
-# person, obstacle.  Open3D expects RGB values in [0, 1].
 PALETTE = np.array(
     [
         [0.45, 0.45, 0.45],
@@ -50,7 +48,6 @@ class LiveViewer(Node):
         if not self.vis.create_window("FFEM Live LiDAR", 1280, 720):
             raise RuntimeError("Open3D failed to create a window")
 
-        # Make the LiDAR visible and avoid the white-on-white appearance.
         options = self.vis.get_render_option()
         options.background_color = np.array([0.02, 0.02, 0.02])
         options.point_size = 2.0
@@ -63,6 +60,7 @@ class LiveViewer(Node):
         self.raw_added = False
         self.semantic_added = False
         self.moving_added = False
+        self.axis_added = False
         self.ready = False
         self.raw_frames = 0
         self.semantic_frames = 0
@@ -117,9 +115,10 @@ class LiveViewer(Node):
             )
             self._add_cloud_once(self.raw_cloud, "raw_added")
             self.vis.update_geometry(self.raw_cloud)
-            if not self.ready:
-                self._add_cloud_once(self.axis, "axis_added") if not hasattr(self, "axis_added") else None
+            if not self.axis_added:
+                self.vis.add_geometry(self.axis)
                 self.axis_added = True
+            if not self.ready:
                 self._reset_camera(self.raw_cloud)
             self.raw_frames += 1
             self.last_points = len(points)

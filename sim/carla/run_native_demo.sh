@@ -9,15 +9,14 @@ STACK_FILE="${STACK_FILE:-$STACK_DIR/stack.json}"
 TOPIC="${CARLA_LIDAR_TOPIC:-/carla/hero/lidar/point_cloud}"
 CHECKPOINT="${FFEM_CHECKPOINT:-$ROOT/models/checkpoints/semanticposs_range_model.pt}"
 
-# Source environment files before enabling nounset: ROS 2 Humble's setup
-# may reference optional variables that are intentionally unset.
+# Source environment files before enabling nounset: ROS 2 Humble setup may
+# reference optional variables that are intentionally unset.
 source "$ROOT/sim/carla/native_env.sh"
 source /opt/ros/humble/setup.bash
 if [[ -f "$ROOT/install/setup.bash" ]]; then
   source "$ROOT/install/setup.bash"
 fi
 set -u
-
 export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
 
 if ! command -v colcon >/dev/null 2>&1; then
@@ -55,40 +54,63 @@ print("CARLA server:", client.get_server_version())
 print("CARLA map:", client.get_world().get_map().name)
 PY
 
+NATIVE_PID=""
+DRIVE_PID=""
+OPEN3D_PID=""
+OWN_NATIVE=0
+
 cleanup() {
   set +e
   [[ -n "${OPEN3D_PID:-}" ]] && kill "$OPEN3D_PID" 2>/dev/null || true
   [[ -n "${DRIVE_PID:-}" ]] && kill "$DRIVE_PID" 2>/dev/null || true
-  [[ -n "${NATIVE_PID:-}" ]] && kill "$NATIVE_PID" 2>/dev/null || true
+  if [[ "${OWN_NATIVE:-0}" == "1" && -n "${NATIVE_PID:-}" ]]; then
+    kill "$NATIVE_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
-cd "$STACK_DIR"
-"$CARLA_PY" ros2_native.py --host 127.0.0.1 --port 2000 --file "$STACK_FILE" --verbose > "$ROOT/outputs/carla_native_ros2.log" 2>&1 &
-NATIVE_PID=$!
+# A native stack may already be running from the manual bring-up test. Reuse
+# it when the publisher is already visible; otherwise start exactly one stack.
+ros2 topic info --no-daemon "$TOPIC" >/tmp/ffem_lidar_topic_check.$$ 2>&1 || true
+if grep -q "Publisher count: 1" /tmp/ffem_lidar_topic_check.$$; then
+  echo "[PASS] Existing native CARLA LiDAR publisher discovered"
+else
+  rm -f /tmp/ffem_lidar_topic_check.$$ || true
+  echo "Starting native CARLA ROS2 stack..."
+  cd "$STACK_DIR"
+  "$CARLA_PY" ros2_native.py --host 127.0.0.1 --port 2000 --file "$STACK_FILE" --verbose > "$ROOT/outputs/carla_native_ros2.log" 2>&1 &
+  NATIVE_PID=$!
+  OWN_NATIVE=1
+  cd "$ROOT"
 
-cd "$ROOT"
-echo "Waiting for $TOPIC ..."
-for _ in $(seq 1 30); do
-  if ros2 topic info "$TOPIC" 2>/dev/null | grep -q "Publisher count: 1"; then
-    echo "[PASS] Native CARLA LiDAR publisher discovered"
-    break
-  fi
-  if ! kill -0 "$NATIVE_PID" 2>/dev/null; then
-    echo "ERROR: ros2_native.py exited. See outputs/carla_native_ros2.log"
+  echo "Waiting for $TOPIC ..."
+  found=0
+  for _ in $(seq 1 45); do
+    if ros2 topic info --no-daemon "$TOPIC" 2>/dev/null | grep -q "Publisher count: 1"; then
+      found=1
+      echo "[PASS] Native CARLA LiDAR publisher discovered"
+      break
+    fi
+    if ! kill -0 "$NATIVE_PID" 2>/dev/null; then
+      echo "ERROR: ros2_native.py exited. See outputs/carla_native_ros2.log"
+      tail -80 outputs/carla_native_ros2.log || true
+      exit 1
+    fi
+    sleep 1
+  done
+
+  if [[ "$found" != "1" ]]; then
+    echo "ERROR: LiDAR publisher was not discovered within 45 seconds."
+    echo "--- ROS graph check ---"
+    ros2 topic info --no-daemon "$TOPIC" 2>&1 || true
+    echo "--- ros2_native.py log ---"
     tail -80 outputs/carla_native_ros2.log || true
     exit 1
   fi
-  sleep 1
-done
-
-if ! ros2 topic info "$TOPIC" 2>/dev/null | grep -q "Publisher count: 1"; then
-  echo "ERROR: LiDAR publisher was not discovered within 30 seconds."
-  tail -80 outputs/carla_native_ros2.log || true
-  exit 1
 fi
+rm -f /tmp/ffem_lidar_topic_check.$$ || true
 
-ros2 topic info "$TOPIC"
+ros2 topic info --no-daemon "$TOPIC"
 
 "$CARLA_PY" "$ROOT/sim/carla/drive_ego.py" --speed-difference=0 > "$ROOT/outputs/carla_drive.log" 2>&1 &
 DRIVE_PID=$!

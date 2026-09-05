@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Controlled uniform-vs-adaptive map storage experiment.
 
-The script first captures a fixed set of live ROS 2 LiDAR frames. It then
-replays those exact same frames through the FFEM adaptive mapper while a
-uniform 0.25 m baseline is computed from the same observations. This avoids
-comparing unrelated live states.
+The experiment captures a fixed set of live ROS 2 LiDAR frames and replays
+those exact frames through FFEM. The uniform baseline uses the *global finest
+FFEM resolution* (0.05 m by default) everywhere, while FFEM keeps its
+variable-resolution radial policy. Both methods are evaluated over the same
+observations and the same map record-size assumption.
 
-The reported memory number is a map-storage proxy based on a fixed per-cell
-record size; it is not whole-process RSS. Cell-count reduction is independent
-of the chosen record size when both methods use the same record size.
+The memory number is a map-storage proxy, not whole-process RSS.
 """
 from __future__ import annotations
 
@@ -54,9 +53,10 @@ class Capture(Node):
         if len(points) == 0:
             return
         self.frames.append((points.copy(), intensity.copy()))
-        self.get_logger().info(
-            f"captured {len(self.frames)}/{self.target} points={len(points)}"
-        )
+        if len(self.frames) == 1 or len(self.frames) % 10 == 0 or len(self.frames) == self.target:
+            self.get_logger().info(
+                f"captured {len(self.frames)}/{self.target} points={len(points)}"
+            )
 
 
 def capture_frames(topic: str, count: int, timeout: float) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -66,7 +66,7 @@ def capture_frames(topic: str, count: int, timeout: float) -> list[tuple[np.ndar
     try:
         while rclpy.ok() and len(node.frames) < count and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
-        frames = node.frames
+        frames = list(node.frames)
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -77,13 +77,26 @@ def capture_frames(topic: str, count: int, timeout: float) -> list[tuple[np.ndar
     return frames
 
 
+def occupied_cells(frames: list[tuple[np.ndarray, np.ndarray]], cell_size: float) -> int:
+    keys: set[tuple[int, int]] = set()
+    for points, _ in frames:
+        q = np.floor(points[:, :2] / cell_size).astype(np.int64)
+        keys.update(map(tuple, q.tolist()))
+    return len(keys)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topic", default="/carla/hero/lidar/point_cloud")
     ap.add_argument("--frames", type=int, default=100)
     ap.add_argument("--capture-timeout", type=float, default=60.0)
     ap.add_argument("--checkpoint", default="models/checkpoints/semanticposs_range_model.pt")
-    ap.add_argument("--uniform-cell", type=float, default=0.25)
+    ap.add_argument(
+        "--uniform-cell",
+        type=float,
+        default=0.05,
+        help="Global finest FFEM cell size used everywhere by the uniform baseline.",
+    )
     ap.add_argument("--cell-bytes", type=int, default=64)
     ap.add_argument("--output", default="outputs/memory_savings.json")
     ap.add_argument("--save-frames", default="outputs/memory_experiment_frames.npz")
@@ -97,8 +110,9 @@ def main() -> None:
     print("=== FFEM Controlled Memory Experiment ===")
     print(f"topic={args.topic}")
     print(f"frames={args.frames}")
-    print(f"uniform_cell={args.uniform_cell:.3f} m")
+    print(f"uniform_global_finest_cell={args.uniform_cell:.3f} m")
     print(f"cell_record_size={args.cell_bytes} bytes")
+    print("baseline=uniform global finest resolution vs FFEM variable radial resolution")
 
     frames = capture_frames(args.topic, args.frames, args.capture_timeout)
 
@@ -112,7 +126,10 @@ def main() -> None:
 
     print("Replaying the exact captured frames through FFEM...")
     segmenter, selected = build_segmenter("torch_range", args.checkpoint, 7)
-    cfg = FFEMConfig(max_active_cells=200_000)
+    cfg = FFEMConfig(
+        finest_cell_size=args.uniform_cell,
+        max_active_cells=200_000,
+    )
     pipeline = FFEMPipeline(config=cfg, segmenter=segmenter)
 
     uniform_keys: set[tuple[int, int]] = set()
@@ -156,9 +173,10 @@ def main() -> None:
         "topic": args.topic,
         "frames": len(frames),
         "checkpoint": selected,
-        "uniform_cell_size_m": args.uniform_cell,
+        "uniform_global_finest_cell_size_m": args.uniform_cell,
         "cell_record_bytes": args.cell_bytes,
-        "baseline": "occupied finest XY cells accumulated from the exact same LiDAR frames",
+        "baseline": "global finest 0.05 m uniform XY cells over the exact same LiDAR frames",
+        "ffem_resolution_policy": "0.05 m / 0.10 m / 0.25 m / 0.50 m radial bands with adaptive refinement",
         "memory_metric": "map-storage proxy; fixed bytes per stored cell; not whole-process RSS",
         "final": {
             "uniform_cells": uniform_final,

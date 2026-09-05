@@ -41,7 +41,8 @@ class DashboardNode(Node):
         else: uniform=0
         adaptive=int(len(self.last_map)); reduction=100.0*(1.0-adaptive/uniform) if uniform else 0.0
         with self.s.lock:
-            self.s.seq+=1; self.s.data.update({'frame':int(self.metrics[0]*0+self.seq),'points':int(self.metrics[4]),'moving':int(self.metrics[5]),'active_cells':adaptive,'uniform_cells':uniform,'memory_reduction_pct':float(reduction),'total_ms':float(self.metrics[0]),'map_ms':float(self.metrics[1]),'topology_changes':int(self.metrics[3]),'tracks':int(self.metrics[6]),'classes':np.bincount(self.last_labels,minlength=7).tolist() if len(self.last_labels) else [0]*7,'semantic':self.down(self.last_sem).tolist(),'semantic_labels':self.down(self.last_labels).tolist(),'adaptive':self.down(self.last_map).tolist(),'moving_points':self.down(self.last_move).tolist(),'updated':time.time()})
+            self.seq += 1
+            self.s.data.update({'frame':int(self.seq),'points':int(self.metrics[4]),'moving':int(self.metrics[5]),'active_cells':adaptive,'uniform_cells':uniform,'memory_reduction_pct':float(reduction),'total_ms':float(self.metrics[0]),'map_ms':float(self.metrics[1]),'topology_changes':int(self.metrics[3]),'tracks':int(self.metrics[6]),'classes':np.bincount(self.last_labels,minlength=7).tolist() if len(self.last_labels) else [0]*7,'semantic':self.down(self.last_sem).tolist(),'semantic_labels':self.down(self.last_labels).tolist(),'adaptive':self.down(self.last_map).tolist(),'moving_points':self.down(self.last_move).tolist(),'updated':time.time()})
         self.s.write()
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):

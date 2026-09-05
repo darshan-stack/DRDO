@@ -28,28 +28,23 @@ try:
 except ImportError:  # pragma: no cover
     rr = None
 
-
 SEMANTIC_PALETTE = np.array(
     [
-        [90, 90, 90],     # unknown
-        [70, 140, 220],   # ground
-        [70, 210, 100],   # vegetation
-        [180, 120, 60],   # structure
-        [230, 70, 60],    # vehicle
-        [220, 80, 180],   # person
-        [245, 190, 40],   # obstacle
-    ],
-    dtype=np.uint8,
+        [90, 90, 90],
+        [70, 140, 220],
+        [70, 210, 100],
+        [180, 120, 60],
+        [230, 70, 60],
+        [220, 80, 180],
+        [245, 190, 40],
+    ], dtype=np.uint8
 )
-
 
 if ROS_AVAILABLE:
 
     class FFEMNode(Node):
         def __init__(self):
             super().__init__("ffem_mapper")
-
-            # Native CARLA ROS 2 defaults.
             self.declare_parameter("input_topic", "/carla/hero/lidar/point_cloud")
             self.declare_parameter("map_frame", "lidar")
             self.declare_parameter("use_tf", False)
@@ -84,15 +79,12 @@ if ROS_AVAILABLE:
             backend = str(self.get_parameter("model_backend").value)
             checkpoint = str(self.get_parameter("checkpoint").value)
             segmenter, selected_checkpoint = build_segmenter(
-                backend,
-                checkpoint,
-                cfg.num_classes,
+                backend, checkpoint, cfg.num_classes,
                 int(self.get_parameter("range_height").value),
                 int(self.get_parameter("range_width").value),
                 float(self.get_parameter("max_range").value),
             )
             self.pipeline = FFEMPipeline(cfg, segmenter=segmenter)
-
             self.frame = 0
             self.map_frame = str(self.get_parameter("map_frame").value)
             self.max_points = int(self.get_parameter("max_points_per_frame").value)
@@ -107,11 +99,8 @@ if ROS_AVAILABLE:
             )
             self.sub = self.create_subscription(
                 PointCloud2,
-                str(self.get_parameter("input_topic").value),
-                self.callback,
-                qos,
+                str(self.get_parameter("input_topic").value), self.callback, qos
             )
-
             self.map_pub = self.create_publisher(PointCloud2, str(self.get_parameter("map_topic").value), 5)
             self.semantic_pub = self.create_publisher(PointCloud2, str(self.get_parameter("semantic_topic").value), 5)
             self.moving_pub = self.create_publisher(PointCloud2, str(self.get_parameter("moving_topic").value), 5)
@@ -124,20 +113,15 @@ if ROS_AVAILABLE:
 
             ckpt_text = selected_checkpoint if selected_checkpoint else "none (fallback)"
             self.get_logger().info(
-                f"FFEM ready | input={self.get_parameter('input_topic').value} | "
-                f"backend={backend} | checkpoint={ckpt_text} | map_frame={self.map_frame} | "
-                f"TF={self.use_tf} | Rerun={self.rerun_enabled}"
+                f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
+                f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | Rerun={self.rerun_enabled}"
             )
 
         def _lookup(self, msg):
             if not self.use_tf or msg.header.frame_id == self.map_frame:
                 return np.eye(4, dtype=np.float64)
             try:
-                transform = self.tf_buffer.lookup_transform(
-                    self.map_frame,
-                    msg.header.frame_id,
-                    msg.header.stamp,
-                )
+                transform = self.tf_buffer.lookup_transform(self.map_frame, msg.header.frame_id, msg.header.stamp)
                 return transform_from_ros_transform(transform.transform)
             except (LookupException, ConnectivityException, ExtrapolationException) as exc:
                 self.get_logger().warning(
@@ -152,84 +136,54 @@ if ROS_AVAILABLE:
                 if not len(decoded.points):
                     self.get_logger().warning("Received an empty PointCloud2", throttle_duration_sec=5.0)
                     return
-
                 if len(decoded.points) > self.max_points:
-                    idx = np.linspace(
-                        0,
-                        len(decoded.points) - 1,
-                        self.max_points,
-                        dtype=int,
-                    )
+                    idx = np.linspace(0, len(decoded.points) - 1, self.max_points, dtype=int)
                 else:
                     idx = slice(None)
-
                 points = decoded.points[idx]
                 intensity = None if decoded.intensity is None else decoded.intensity[idx]
-
                 matrix = self._lookup(msg)
                 if matrix is None:
                     return
-
                 points = transform_points(points, matrix)
-                result = self.pipeline.process_points(
-                    points,
-                    intensity=intensity,
-                    frame=self.frame,
-                )
+                result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
                 self._publish(result, msg.header.stamp)
                 self._log_rerun(result)
                 self.frame += 1
-
                 if self.frame == 1 or self.frame % 25 == 0:
                     stats = result["stats"]
                     labels = np.argmax(result["semantic_probs"], axis=1)
                     counts = np.bincount(labels, minlength=self.pipeline.config.num_classes)
                     self.get_logger().info(
                         "frame=%d points=%d active_cells=%d moving=%d total_ms=%.2f classes=%s"
-                        % (
-                            self.frame,
-                            len(points),
-                            int(stats["active_cells"]),
-                            int(stats["moving_points"]),
-                            float(stats["total_ms"]),
-                            counts.tolist(),
-                        )
+                        % (self.frame, len(points), int(stats["active_cells"]), int(stats["moving_points"]),
+                           float(stats["total_ms"]), counts.tolist())
                     )
             except Exception as exc:
                 self.get_logger().error(f"FFEM callback failed: {type(exc).__name__}: {exc}")
 
         def _publish(self, result, stamp):
-            map_points, _, _ = self.pipeline.mapping.arrays()
+            map_points, _, levels = self.pipeline.mapping.arrays()
             self.map_pub.publish(
-                encode_pointcloud2(map_points, frame_id=self.map_frame, stamp=stamp)
+                encode_pointcloud2(
+                    map_points, frame_id=self.map_frame, stamp=stamp,
+                    intensity=levels.astype(np.float32) if len(levels) else None,
+                )
             )
 
             labels = np.argmax(result["semantic_probs"], axis=1).astype(np.float32)
             self.semantic_pub.publish(
-                encode_pointcloud2(
-                    result["points"],
-                    frame_id=self.map_frame,
-                    stamp=stamp,
-                    intensity=labels,
-                )
+                encode_pointcloud2(result["points"], frame_id=self.map_frame, stamp=stamp, intensity=labels)
             )
 
             moving = result["points"][result["moving"]]
-            self.moving_pub.publish(
-                encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp)
-            )
+            self.moving_pub.publish(encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp))
 
             stats = result["stats"]
             msg = Float32MultiArray()
-            msg.data = [
-                float(stats["total_ms"]),
-                float(stats["map_ms"]),
-                float(stats["active_cells"]),
-                float(stats["topology_changes"]),
-                float(stats["points"]),
-                float(stats["moving_points"]),
-                float(stats.get("tracks", 0)),
-            ]
+            msg.data = [float(stats["total_ms"]), float(stats["map_ms"]), float(stats["active_cells"]),
+                        float(stats["topology_changes"]), float(stats["points"]), float(stats["moving_points"]),
+                        float(stats.get("tracks", 0))]
             self.metrics_pub.publish(msg)
 
             if self.pipeline.mapping.events:
@@ -240,35 +194,21 @@ if ROS_AVAILABLE:
         def _log_rerun(self, result):
             if not self.rerun_enabled:
                 return
-
             stats = result["stats"]
             map_points, map_colors, levels = self.pipeline.mapping.arrays()
             labels = np.argmax(result["semantic_probs"], axis=1)
             colors = SEMANTIC_PALETTE[np.clip(labels, 0, len(SEMANTIC_PALETTE) - 1)]
-
             rr.set_time("frame", sequence=self.frame)
             rr.log("world/lidar/raw", rr.Points3D(result["points"]))
             rr.log("world/lidar/semantic", rr.Points3D(result["points"], colors=colors))
             rr.log("world/dynamics/moving_points", rr.Points3D(result["points"][result["moving"]]))
-
             if len(map_points):
                 rr.log("world/map/elevation", rr.Points3D(map_points, colors=map_colors))
-                rr.log(
-                    "world/map/adaptive_cells",
-                    rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors),
-                )
-
+                rr.log("world/map/adaptive_cells", rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))
             if self.pipeline.mapping.events:
                 events = self.pipeline.mapping.events[-20:]
-                event_pts = np.array(
-                    [[e["cell"][1], e["cell"][2], 0.05] for e in events],
-                    dtype=np.float32,
-                )
-                rr.log(
-                    "world/adaptation/refinement_events",
-                    rr.Points3D(event_pts, radii=0.08),
-                )
-
+                event_pts = np.array([[e["cell"][1], e["cell"][2], 0.05] for e in events], dtype=np.float32)
+                rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))
             rr.log("metrics/memory/active_cells", rr.Scalars([stats["active_cells"]]))
@@ -293,14 +233,11 @@ if ROS_AVAILABLE:
             rclpy.shutdown()
 
 else:
-
     class FFEMNode:
         def __init__(self):
             raise RuntimeError("ROS 2 is not installed.")
-
     def main(args=None):
         raise RuntimeError("ROS 2 is not installed.")
-
 
 if __name__ == "__main__":
     main()

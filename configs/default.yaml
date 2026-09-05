@@ -12,8 +12,10 @@ sensor:
   vertical_resolution_m: 0.25
 
 mapping:
-  base_cell_size_m: 1.0
-  finest_cell_size_m: 0.25
+  base_cell_size_m: 0.50
+  finest_cell_size_m: 0.05
+  radial_bands_m: [0.0, 10.0, 30.0, 60.0, 100.0]
+  radial_cell_sizes_m: [0.05, 0.10, 0.25, 0.50]
   max_level: 2
   min_observations_for_slice: 8
   slice_separation_m: 0.35
@@ -34,8 +36,8 @@ adaptation:
   predictive_dilation_frames: 2
 
 perception:
-  backend: fallback
-  checkpoint: ""
+  backend: auto
+  checkpoint: models/checkpoints/semanticposs_range_model.pt
   num_classes: 7
   range_height: 32
   range_width: 1024

@@ -15,10 +15,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('input_topic', default_value='/carla/hero/lidar/point_cloud'),
-        # Native CARLA ROS 2 sensors do not require the official bridge. For the
-        # native demo we keep the LiDAR frame as the map frame and disable TF.
-        # Set use_tf:=true and map_frame:=map when a valid TF tree is available.
-        DeclareLaunchArgument('map_frame', default_value='hero/lidar'),
+        # Native CARLA ROS 2 publishes the point cloud in the lidar frame. Keep
+        # that frame as the initial local mapping frame so the demo does not
+        # depend on an external map->base transform.
+        # Set use_tf:=true and map_frame:=map for a world-fixed mapping setup.
+        DeclareLaunchArgument('map_frame', default_value='lidar'),
         DeclareLaunchArgument('model_backend', default_value='auto'),
         DeclareLaunchArgument('checkpoint', default_value=''),
         DeclareLaunchArgument('use_tf', default_value='false'),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CARLA_ROOT="${CARLA_ROOT:-$HOME/CARLA}"
@@ -9,30 +9,29 @@ STACK_FILE="${STACK_FILE:-$STACK_DIR/stack.json}"
 TOPIC="${CARLA_LIDAR_TOPIC:-/carla/hero/lidar/point_cloud}"
 CHECKPOINT="${FFEM_CHECKPOINT:-$ROOT/models/checkpoints/semanticposs_range_model.pt}"
 
-# CARLA 0.9.16 native ROS2 uses Fast DDS. Keep every process on one domain.
+# Source environment files before enabling nounset: ROS 2 Humble's setup
+# may reference optional variables that are intentionally unset.
 source "$ROOT/sim/carla/native_env.sh"
 source /opt/ros/humble/setup.bash
 if [[ -f "$ROOT/install/setup.bash" ]]; then
   source "$ROOT/install/setup.bash"
 fi
-# The Open3D viewer imports the local ffem package directly.
+set -u
+
 export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
 
 if ! command -v colcon >/dev/null 2>&1; then
   echo "ERROR: colcon is not installed/available. Source ROS 2 Humble first."
   exit 1
 fi
-
 if [[ ! -x "$CARLA_PY" ]]; then
   echo "ERROR: CARLA Python environment not found: $CARLA_PY"
   exit 1
 fi
-
 if [[ ! -f "$STACK_FILE" ]]; then
   echo "ERROR: Native CARLA stack file not found: $STACK_FILE"
   exit 1
 fi
-
 if [[ ! -f "$CHECKPOINT" ]]; then
   echo "ERROR: Checkpoint not found: $CHECKPOINT"
   exit 1
@@ -48,7 +47,6 @@ echo "FASTDDS_BUILTIN_TRANSPORTS=$FASTDDS_BUILTIN_TRANSPORTS"
 echo "LiDAR topic=$TOPIC"
 echo "Checkpoint=$CHECKPOINT"
 
-# Verify the server is reachable before starting any ROS process.
 "$CARLA_PY" - <<'PY'
 import carla
 client = carla.Client("127.0.0.1", 2000)
@@ -92,15 +90,12 @@ fi
 
 ros2 topic info "$TOPIC"
 
-# The native example owns the hero actor; this helper only enables autopilot.
 "$CARLA_PY" "$ROOT/sim/carla/drive_ego.py" --speed-difference=0 > "$ROOT/outputs/carla_drive.log" 2>&1 &
 DRIVE_PID=$!
 
-# Live Open3D viewer for the same real ROS2 LiDAR stream.
 python3 "$ROOT/scripts/live_open3d_ros2.py" --topic "$TOPIC" > "$ROOT/outputs/open3d_live.log" 2>&1 &
 OPEN3D_PID=$!
 
-# Real FFEM inference. The node's Rerun instance is spawned automatically.
 ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
   input_topic:="$TOPIC" \
   map_frame:=lidar \

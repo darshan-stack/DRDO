@@ -7,7 +7,7 @@ name = "ffem-lidar-mapping"
 version = "0.1.0"
 description = "Research scaffold for adaptive variable-resolution 2.5D LiDAR mapping"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26", "pyyaml>=6.0", "rerun-sdk>=0.22"]
+dependencies = ["numpy>=1.26", "pyyaml>=6.0", "rerun-sdk>=0.22", "pillow>=10.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]

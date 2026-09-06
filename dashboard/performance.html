@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FFEM Performance Evidence — PS 26053</title>
+<style>
+:root{--bg:#03080d;--panel:#0b1823;--line:#29455a;--text:#eef7fb;--muted:#91a8b7;--cyan:#5edcff;--green:#55e694;--amber:#ffd166;--red:#ff5a61}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0%,#153449,#04090e 48%,#010307 100%);color:var(--text);font-family:Inter,system-ui,sans-serif}.wrap{max-width:1250px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:18px}.h1{font-size:25px;font-weight:900}.sub{color:var(--muted);font-size:12px;margin-top:5px}.live{color:var(--cyan);font-weight:800;font-size:12px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}.card{background:linear-gradient(180deg,#0b1925,#071018);border:1px solid var(--line);border-radius:15px;padding:15px}.label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px}.value{font-size:30px;font-weight:900;margin-top:5px}.unit{font-size:11px;color:var(--muted);margin-top:3px}.green{color:var(--green)}.cyan{color:var(--cyan)}.amber{color:var(--amber)}.section{margin-top:16px}.section h2{font-size:17px;margin:0}.table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}.table td{padding:9px 4px;border-bottom:1px solid #1d3444}.table td:last-child{text-align:right;font-weight:800}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pill{display:inline-block;padding:6px 9px;border-radius:999px;border:1px solid var(--line);font-size:10px;color:#d6e8ef;background:#07131c;margin:5px 5px 0 0}.note{color:var(--muted);font-size:11px;line-height:1.5;margin-top:10px}.status{margin-top:14px;padding:10px 12px;border-left:3px solid var(--green);background:#07131a;border-radius:7px;font-size:12px}.warn{border-left-color:var(--amber)}@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}}@media(max-width:600px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div><div class="h1">FFEM Performance Evidence</div><div class="sub">PS 26053 • measured latency, FPS and adaptive map-storage evidence</div></div><div class="live" id="status">WAITING FOR BENCHMARK</div></div>
+<div class="grid">
+<div class="card"><div class="label">Estimated FPS</div><div class="value cyan" id="fps">—</div><div class="unit">1000 / mean processing ms</div></div>
+<div class="card"><div class="label">Mean latency</div><div class="value" id="mean">—</div><div class="unit">milliseconds / frame</div></div>
+<div class="card"><div class="label">P95 latency</div><div class="value amber" id="p95">—</div><div class="unit">milliseconds / frame</div></div>
+<div class="card"><div class="label">Memory reduction</div><div class="value green" id="mem">—</div><div class="unit">map-storage proxy</div></div>
+</div>
+<div class="section two">
+<div class="card"><h2>Runtime benchmark</h2><table class="table"><tr><td>Profile</td><td id="profile">—</td></tr><tr><td>Frames</td><td id="frames">—</td></tr><tr><td>Mean LiDAR points</td><td id="points">—</td></tr><tr><td>Range image</td><td id="range">—</td></tr><tr><td>Max points/frame</td><td id="maxpoints">—</td></tr><tr><td>Mean map update</td><td id="mapms">—</td></tr><tr><td>P95 map update</td><td id="p95map">—</td></tr></table></div>
+<div class="card"><h2>Controlled memory experiment</h2><table class="table"><tr><td>Frames</td><td id="mframes">—</td></tr><tr><td>Uniform 5 cm cells</td><td id="uniform">—</td></tr><tr><td>FFEM adaptive cells</td><td id="adaptive">—</td></tr><tr><td>Uniform storage</td><td id="ustorage">—</td></tr><tr><td>FFEM storage</td><td id="astorage">—</td></tr><tr><td>Cell reduction</td><td id="cellred">—</td></tr></table></div>
+</div>
+<div class="section card"><h2>What to tell the judge</h2><div class="status" id="judge">Run the benchmark to populate measured workstation results.</div><div class="pill">same captured LiDAR frames</div><div class="pill">trained PyTorch model</div><div class="pill">adaptive 2.5D mapping</div><div class="pill">mean + p95 latency</div><div class="pill">map-storage reduction</div><div class="note">FPS is reported as a measured software benchmark on the current workstation. Memory reduction is a fixed-bytes-per-cell map-storage proxy, not whole-process RSS.</div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function fmt(v,d=1){return Number.isFinite(Number(v))?Number(v).toFixed(d):'—'}
+async function load(){
+  try{
+    const p=await fetch('/outputs/performance_benchmark.json?'+Date.now()).then(r=>r.json());
+    if(!p.estimated_fps)throw Error('no benchmark');
+    $('fps').textContent=fmt(p.estimated_fps,2);$('mean').textContent=fmt(p.mean_total_ms,1)+' ms';$('p95').textContent=fmt(p.p95_total_ms,1)+' ms';
+    $('profile').textContent=p.profile||'—';$('frames').textContent=p.frames??'—';$('points').textContent=Math.round(p.mean_points||0).toLocaleString();$('range').textContent=(p.range_image?.height||'—')+' × '+(p.range_image?.width||'—');$('maxpoints').textContent=(p.max_points_per_frame||0).toLocaleString();$('mapms').textContent=fmt(p.mean_map_ms,1)+' ms';$('p95map').textContent=fmt(p.p95_map_ms,1)+' ms';
+    $('status').textContent='BENCHMARK LOADED';$('status').style.color='#55e694';$('judge').textContent=`Measured on this workstation: ${fmt(p.estimated_fps,2)} FPS equivalent, mean ${fmt(p.mean_total_ms,1)} ms/frame, p95 ${fmt(p.p95_total_ms,1)} ms/frame.`;
+  }catch(e){}
+  try{
+    const m=await fetch('/outputs/memory_savings.json?'+Date.now()).then(r=>r.json()),f=m.final||{};
+    if(!f.uniform_cells)throw Error('no memory');
+    $('mem').textContent=fmt(f.memory_reduction_pct,2)+'%';$('mframes').textContent=m.frames??'—';$('uniform').textContent=(f.uniform_cells||0).toLocaleString();$('adaptive').textContent=(f.adaptive_cells||0).toLocaleString();$('ustorage').textContent=fmt((f.uniform_bytes||0)/1048576,2)+' MB';$('astorage').textContent=fmt((f.adaptive_bytes||0)/1048576,2)+' MB';$('cellred').textContent=fmt(f.cell_reduction_pct,2)+'%';
+  }catch(e){}
+}
+load();setInterval(load,3000);
+</script>
+</body>
+</html>

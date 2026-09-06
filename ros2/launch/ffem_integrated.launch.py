@@ -12,19 +12,29 @@ def generate_launch_description():
     use_tf = LaunchConfiguration('use_tf')
     enable_rerun = LaunchConfiguration('enable_rerun')
     recording = LaunchConfiguration('recording')
+    range_height = LaunchConfiguration('range_height')
+    range_width = LaunchConfiguration('range_width')
+    max_range = LaunchConfiguration('max_range')
+    max_points_per_frame = LaunchConfiguration('max_points_per_frame')
+    max_active_cells = LaunchConfiguration('max_active_cells')
+    max_topology_changes = LaunchConfiguration('max_topology_changes')
+    queue_depth = LaunchConfiguration('queue_depth')
 
     return LaunchDescription([
         DeclareLaunchArgument('input_topic', default_value='/carla/hero/lidar/point_cloud'),
-        # Native CARLA ROS 2 publishes the point cloud in the lidar frame. Keep
-        # that frame as the initial local mapping frame so the demo does not
-        # depend on an external map->base transform.
-        # Set use_tf:=true and map_frame:=map for a world-fixed mapping setup.
         DeclareLaunchArgument('map_frame', default_value='lidar'),
         DeclareLaunchArgument('model_backend', default_value='auto'),
         DeclareLaunchArgument('checkpoint', default_value=''),
         DeclareLaunchArgument('use_tf', default_value='false'),
         DeclareLaunchArgument('enable_rerun', default_value='true'),
         DeclareLaunchArgument('recording', default_value='outputs/carla_ffem.rrd'),
+        DeclareLaunchArgument('range_height', default_value='32'),
+        DeclareLaunchArgument('range_width', default_value='1024'),
+        DeclareLaunchArgument('max_range', default_value='80.0'),
+        DeclareLaunchArgument('max_points_per_frame', default_value='150000'),
+        DeclareLaunchArgument('max_active_cells', default_value='20000'),
+        DeclareLaunchArgument('max_topology_changes', default_value='32'),
+        DeclareLaunchArgument('queue_depth', default_value='5'),
         Node(
             package='ffem_lidar_mapping',
             executable='ffem_node',
@@ -38,6 +48,13 @@ def generate_launch_description():
                 'use_tf': use_tf,
                 'enable_rerun': enable_rerun,
                 'recording': recording,
+                'range_height': range_height,
+                'range_width': range_width,
+                'max_range': max_range,
+                'max_points_per_frame': max_points_per_frame,
+                'max_active_cells': max_active_cells,
+                'max_topology_changes': max_topology_changes,
+                'queue_depth': queue_depth,
             }],
         ),
     ])

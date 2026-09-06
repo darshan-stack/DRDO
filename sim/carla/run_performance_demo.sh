@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # PS 26053 performance profile.
-# Keeps the same trained model and adaptive 2.5D mapper, while reducing
-# range-image and point-processing cost for an explicit latency/FPS demo.
+# Same trained semantic model + adaptive 2.5D mapper, with a controlled
+# lower-cost range projection and point budget for repeatable latency/FPS tests.
+# CPU is the default because the project workstation previously hit CUDA OOM.
+# Set FFEM_USE_GPU=1 only when sufficient GPU memory is available.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
@@ -25,20 +27,24 @@ if [[ ! -f "$CHECKPOINT" ]]; then
   exit 1
 fi
 
+if [[ "${FFEM_USE_GPU:-0}" != "1" ]]; then
+  export CUDA_VISIBLE_DEVICES=""
+fi
+
 echo "=== FFEM PS 26053 PERFORMANCE PROFILE ==="
 echo "range image : 16 x 512"
 echo "max points  : 6000 / frame"
 echo "active cells: 12000"
 echo "queue depth : 2"
+if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  echo "device      : GPU"
+else
+  echo "device      : CPU"
+fi
 echo "Rerun       : enabled"
 echo
 
-auto_cuda=""
-if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
-  auto_cuda="CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
-fi
-
-eval "$auto_cuda ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
+exec ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
   input_topic:=$TOPIC \
   map_frame:=lidar \
   use_tf:=false \
@@ -51,4 +57,4 @@ eval "$auto_cuda ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
   max_active_cells:=12000 \
   max_topology_changes:=24 \
   queue_depth:=2 \
-  enable_rerun:=true"
+  enable_rerun:=true

@@ -115,7 +115,6 @@ class DashboardNode(Node):
         if enc in {"mono8", "8uc1"}:
             g = raw.reshape(h, msg.step)[:, :w]
             return np.repeat(g[:, :, None], 3, axis=2).copy()
-        # Best-effort fallback for common 4-byte image streams.
         channels = max(1, int(msg.step // max(w, 1)))
         if channels >= 4 and raw.size >= h * msg.step:
             x = raw.reshape(h, msg.step)[:, : w * channels].reshape(h, w, channels)
@@ -199,12 +198,20 @@ class DashboardNode(Node):
 
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path.split("?")[0] == "/outputs/dashboard_state.json":
+        path = self.path.split("?")[0]
+        if path in {
+            "/outputs/dashboard_state.json",
+            "/outputs/memory_savings.json",
+            "/outputs/performance_benchmark.json",
+            "/outputs/carla_generalization.json",
+        }:
             try:
-                data = (ROOT / "outputs" / "dashboard_state.json").read_bytes()
+                data = (ROOT / path.lstrip("/")).read_bytes()
+                status = 200
             except FileNotFoundError:
                 data = b"{}"
-            self.send_response(200)
+                status = 200
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()

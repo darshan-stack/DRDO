@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -56,12 +57,9 @@ def generate_launch_description():
         name='ffem_rviz2',
         output='screen',
         arguments=['-d', rviz_config],
-        condition=None,
+        condition=IfCondition(enable_rviz),
     )
 
-    # Launch-time boolean control is implemented by a small shell-compatible
-    # convention: the default is true for the full architecture demo. Users can
-    # pass enable_rviz:=false and omit the RViz node manually when needed.
     return LaunchDescription([
         DeclareLaunchArgument('input_topic', default_value='/carla/hero/lidar/point_cloud'),
         DeclareLaunchArgument('map_frame', default_value='lidar'),

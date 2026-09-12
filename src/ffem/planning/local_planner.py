@@ -23,8 +23,8 @@ class LocalRiskPlanner:
         return np.arange(-limit, limit + 0.5 * step, step, dtype=np.float32)
 
     def _cell_at(self, mapping, x: float, y: float):
-        cell_id = mapping.locate_leaf(float(x), float(y))
-        return mapping.nodes.get(cell_id)
+        cell_id = mapping.peek_leaf(float(x), float(y))
+        return mapping.nodes.get(cell_id) if cell_id is not None else None
 
     def _risk(self, cell) -> float:
         if cell is None:
@@ -60,7 +60,6 @@ class LocalRiskPlanner:
         results.sort(key=lambda item: item[0])
         best = results[0]
         risk_profile = np.asarray(best[3], dtype=np.float32)
-        # Normalize the path risk so it can be fed back into [0,1] attention.
         if len(risk_profile):
             lo, hi = float(risk_profile.min()), float(risk_profile.max())
             if hi > lo:

@@ -2,7 +2,7 @@
 <package format="3">
   <name>ffem_lidar_mapping</name>
   <version>0.2.0</version>
-  <description>Feedback-Foveated Elevation Mapping ROS 2 adapter with adaptive 2.5D diagnostics and RViz visualization.</description>
+  <description>Feedback-Foveated Elevation Mapping ROS 2 adapter with adaptive 2.5D diagnostics, planning risk, and RViz visualization.</description>
   <maintainer email="research@example.com">FFEM Research Team</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>
@@ -10,6 +10,7 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>

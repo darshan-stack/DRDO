@@ -1,4 +1,4 @@
-"""Live ROS 2 adapter: PointCloud2 -> FFEM -> semantic/2.5D outputs/Rerun/RViz/planning."""
+"""Live ROS 2 adapter: PointCloud2 -> FFEM -> semantic/2.5D/RViz/Rerun/planning."""
 from __future__ import annotations
 
 import json
@@ -43,6 +43,7 @@ SEMANTIC_PALETTE = np.array(
     ], dtype=np.uint8
 )
 
+
 if ROS_AVAILABLE:
 
     class FFEMNode(Node):
@@ -86,11 +87,12 @@ if ROS_AVAILABLE:
                 max_active_cells=int(self.get_parameter("max_active_cells").value),
                 max_topology_changes=int(self.get_parameter("max_topology_changes").value),
             )
-
             backend = str(self.get_parameter("model_backend").value)
             checkpoint = str(self.get_parameter("checkpoint").value)
             segmenter, selected_checkpoint = build_segmenter(
-                backend, checkpoint, cfg.num_classes,
+                backend,
+                checkpoint,
+                cfg.num_classes,
                 int(self.get_parameter("range_height").value),
                 int(self.get_parameter("range_width").value),
                 float(self.get_parameter("max_range").value),
@@ -116,7 +118,9 @@ if ROS_AVAILABLE:
             )
             self.sub = self.create_subscription(
                 PointCloud2,
-                str(self.get_parameter("input_topic").value), self.callback, qos
+                str(self.get_parameter("input_topic").value),
+                self.callback,
+                qos,
             )
             self.map_pub = self.create_publisher(PointCloud2, str(self.get_parameter("map_topic").value), 5)
             self.semantic_pub = self.create_publisher(PointCloud2, str(self.get_parameter("semantic_topic").value), 5)
@@ -140,7 +144,7 @@ if ROS_AVAILABLE:
             self.get_logger().info(
                 f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
                 f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | "
-                f"Rerun={self.rerun_enabled} | planner=local_risk"
+                f"Rerun={self.rerun_enabled} | planner=local_risk | feedback=closed_loop | hierarchy=4ary"
             )
 
         def _lookup(self, msg):
@@ -160,7 +164,6 @@ if ROS_AVAILABLE:
             try:
                 decoded = decode_pointcloud2(msg, remove_invalid=True)
                 if not len(decoded.points):
-                    self.get_logger().warning("Received an empty PointCloud2", throttle_duration_sec=5.0)
                     return
                 if len(decoded.points) > self.max_points:
                     idx = np.linspace(0, len(decoded.points) - 1, self.max_points, dtype=int)
@@ -173,17 +176,38 @@ if ROS_AVAILABLE:
                     return
                 points = transform_points(points, matrix)
                 result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
-                self._publish(result, msg.header.stamp)
-                self._log_rerun(result)
+
+                # First planning pass observes the current map. Its risk profile
+                # is fed back into cell criticality/refinement before the final
+                # path is generated for this frame.
+                preliminary_plan = self.planner.plan(self.pipeline.mapping)
+                feedback_changes = self.pipeline.mapping.apply_planning_feedback(
+                    preliminary_plan["points"], preliminary_plan["risk_profile"], self.frame
+                )
+                final_plan = self.planner.plan(self.pipeline.mapping)
+
+                self._publish(result, msg.header.stamp, final_plan, feedback_changes)
+                self._log_rerun(result, final_plan)
                 self.frame += 1
                 if self.frame == 1 or self.frame % 25 == 0:
                     stats = result["stats"]
                     labels = np.argmax(result["semantic_probs"], axis=1)
                     counts = np.bincount(labels, minlength=self.pipeline.config.num_classes)
                     self.get_logger().info(
-                        "frame=%d points=%d active_cells=%d moving=%d tracks=%d total_ms=%.2f classes=%s"
-                        % (self.frame, len(points), int(stats["active_cells"]), int(stats["moving_points"]),
-                           int(stats.get("tracks", 0)), float(stats["total_ms"]), counts.tolist())
+                        "frame=%d points=%d active_cells=%d hierarchy_nodes=%d moving=%d tracks=%d "
+                        "feedback_refines=%d plan_cost=%.2f total_ms=%.2f classes=%s"
+                        % (
+                            self.frame,
+                            len(points),
+                            int(stats["active_cells"]),
+                            int(len(self.pipeline.mapping.nodes)),
+                            int(stats["moving_points"]),
+                            int(stats.get("tracks", 0)),
+                            int(feedback_changes),
+                            float(final_plan["cost"]),
+                            float(stats["total_ms"]),
+                            counts.tolist(),
+                        )
                     )
             except Exception as exc:
                 self.get_logger().error(f"FFEM callback failed: {type(exc).__name__}: {exc}")
@@ -214,7 +238,6 @@ if ROS_AVAILABLE:
                 marker.color.b = 0.12
                 marker.color.a = 0.85
                 array.markers.append(marker)
-
                 text = Marker()
                 text.header = marker.header
                 text.ns = "ffem_track_labels"
@@ -224,10 +247,7 @@ if ROS_AVAILABLE:
                 text.pose = marker.pose
                 text.pose.position.z += marker.scale.z * 0.8
                 text.scale.z = 0.45
-                text.color.r = 1.0
-                text.color.g = 1.0
-                text.color.b = 1.0
-                text.color.a = 1.0
+                text.color.r = text.color.g = text.color.b = text.color.a = 1.0
                 text.text = f"T{track.track_id}"
                 array.markers.append(text)
             self.tracks_pub.publish(array)
@@ -238,120 +258,109 @@ if ROS_AVAILABLE:
             clear.action = Marker.DELETEALL
             array.markers.append(clear)
             for i, event in enumerate(self.pipeline.mapping.events[-32:]):
-                b, ix, iy = event["cell"]
-                band_size = float(self.pipeline.mapping._sizes[int(b)])
-                level = int(event["new_level"])
-                s = band_size / (2 ** level)
-                m = Marker()
-                m.header.frame_id = self.map_frame
-                m.header.stamp = self.get_clock().now().to_msg()
-                m.ns = "ffem_refinement"
-                m.id = i
-                m.type = Marker.CUBE
-                m.action = Marker.ADD
-                m.pose.position.x = (ix + 0.5) * s
-                m.pose.position.y = (iy + 0.5) * s
-                m.pose.position.z = 0.15
-                m.scale.x = max(s * 0.9, 0.05)
-                m.scale.y = max(s * 0.9, 0.05)
-                m.scale.z = 0.08
-                if event["reason"] == "attention":
-                    m.color.r, m.color.g, m.color.b = 1.0, 0.55, 0.05
+                band, level, ix, iy = event["cell"]
+                size = float(self.pipeline.mapping._sizes[int(band)]) / (2 ** int(event["new_level"]))
+                marker = Marker()
+                marker.header.frame_id = self.map_frame
+                marker.header.stamp = self.get_clock().now().to_msg()
+                marker.ns = "ffem_refinement"
+                marker.id = i
+                marker.type = Marker.CUBE
+                marker.action = Marker.ADD
+                marker.pose.position.x = (ix + 0.5) * size
+                marker.pose.position.y = (iy + 0.5) * size
+                marker.pose.position.z = 0.15
+                marker.scale.x = max(size * 0.9, 0.05)
+                marker.scale.y = max(size * 0.9, 0.05)
+                marker.scale.z = 0.08
+                if event["reason"] in ("attention", "planning_feedback"):
+                    marker.color.r, marker.color.g, marker.color.b = 1.0, 0.55, 0.05
                 else:
-                    m.color.r, m.color.g, m.color.b = 0.1, 0.5, 1.0
-                m.color.a = 0.7
-                array.markers.append(m)
+                    marker.color.r, marker.color.g, marker.color.b = 0.1, 0.5, 1.0
+                marker.color.a = 0.7
+                array.markers.append(marker)
             self.refinement_markers_pub.publish(array)
 
         def _publish_planning_path(self, plan, stamp):
-            msg = PathMsg()
-            msg.header.frame_id = self.map_frame
-            msg.header.stamp = stamp
-            pts = plan["points"]
-            for i, (x, y) in enumerate(pts):
+            path_msg = PathMsg()
+            path_msg.header.frame_id = self.map_frame
+            path_msg.header.stamp = stamp
+            points = plan["points"]
+            for i, (x, y) in enumerate(points):
                 pose = PoseStamped()
-                pose.header = msg.header
+                pose.header = path_msg.header
                 pose.pose.position.x = float(x)
                 pose.pose.position.y = float(y)
                 pose.pose.position.z = 0.05
-                if i + 1 < len(pts):
-                    nx, ny = pts[i + 1]
-                else:
-                    nx, ny = pts[i]
+                nx, ny = points[i + 1] if i + 1 < len(points) else points[i]
                 yaw = float(np.arctan2(float(ny - y), float(nx - x)))
                 pose.pose.orientation.z = float(np.sin(yaw / 2.0))
                 pose.pose.orientation.w = float(np.cos(yaw / 2.0))
-                msg.poses.append(pose)
-            self.planning_path_pub.publish(msg)
+                path_msg.poses.append(pose)
+            self.planning_path_pub.publish(path_msg)
 
-        def _publish(self, result, stamp):
+        def _publish(self, result, stamp, plan, feedback_changes):
             map_points, _, _ = self.pipeline.mapping.arrays()
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
 
-            self.map_pub.publish(
-                encode_pointcloud2(
-                    map_points, frame_id=self.map_frame, stamp=stamp,
-                    intensity=map_points[:, 2] if len(map_points) else None,
-                )
-            )
+            self.map_pub.publish(encode_pointcloud2(
+                map_points, frame_id=self.map_frame, stamp=stamp,
+                intensity=map_points[:, 2] if len(map_points) else None,
+            ))
 
             labels = np.argmax(result["semantic_probs"], axis=1).astype(np.int32)
-            semantic_rgb = self._semantic_rgb(labels)
-            self.semantic_pub.publish(
-                encode_pointcloud2(result["points"], frame_id=self.map_frame, stamp=stamp, rgb=semantic_rgb)
-            )
+            self.semantic_pub.publish(encode_pointcloud2(
+                result["points"], frame_id=self.map_frame, stamp=stamp,
+                rgb=self._semantic_rgb(labels),
+            ))
 
             moving = result["points"][result["moving"]]
             moving_rgb = np.tile(np.array([[255, 45, 45]], dtype=np.uint8), (len(moving), 1))
-            self.moving_pub.publish(encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp, rgb=moving_rgb))
+            self.moving_pub.publish(encode_pointcloud2(
+                moving, frame_id=self.map_frame, stamp=stamp,
+                rgb=moving_rgb,
+            ))
 
-            self.adaptive_pub.publish(
-                encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp,
-                                   intensity=cell_levels.astype(np.float32))
-            )
-            self.traversability_pub.publish(
-                encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=traversability)
-            )
-            self.uncertainty_pub.publish(
-                encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=uncertainty)
-            )
-            self.attention_pub.publish(
-                encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=attention)
-            )
+            self.adaptive_pub.publish(encode_pointcloud2(
+                cell_points, frame_id=self.map_frame, stamp=stamp,
+                intensity=cell_levels.astype(np.float32),
+            ))
+            self.traversability_pub.publish(encode_pointcloud2(
+                cell_points, frame_id=self.map_frame, stamp=stamp,
+                intensity=traversability,
+            ))
+            self.uncertainty_pub.publish(encode_pointcloud2(
+                cell_points, frame_id=self.map_frame, stamp=stamp,
+                intensity=uncertainty,
+            ))
+            self.attention_pub.publish(encode_pointcloud2(
+                cell_points, frame_id=self.map_frame, stamp=stamp,
+                intensity=attention,
+            ))
             self._publish_tracks(result.get("tracks", []))
             self._publish_refinement_markers()
-
-            plan = self.planner.plan(self.pipeline.mapping)
             self._publish_planning_path(plan, stamp)
 
             stats = result["stats"]
-            msg = Float32MultiArray()
-            msg.data = [
+            self.metrics_pub.publish(Float32MultiArray(data=[
                 float(stats["total_ms"]), float(stats["map_ms"]), float(stats["active_cells"]),
                 float(stats["topology_changes"]), float(stats["points"]), float(stats["moving_points"]),
-                float(stats.get("tracks", 0)),
-            ]
-            self.metrics_pub.publish(msg)
+                float(stats.get("tracks", 0)), float(len(self.pipeline.mapping.nodes)),
+                float(feedback_changes),
+            ]))
 
-            planning = Float32MultiArray()
-            planning.data = [
-                float(np.mean(1.0 - traversability)) if len(traversability) else 0.0,
-                float(np.max(uncertainty)) if len(uncertainty) else 0.0,
-                float(np.max(attention)) if len(attention) else 0.0,
-                float(np.mean(attention)) if len(attention) else 0.0,
-                float(stats["moving_points"]),
-                float(stats.get("tracks", 0)),
-                float(plan["cost"]),
-                float(plan["target_lateral_m"]),
-            ]
-            self.planning_risk_pub.publish(planning)
+            planning_risk = Float32MultiArray(data=[
+                float(plan["mean_risk"]), float(plan["max_risk"]), float(plan["cost"]),
+                float(plan["target_lateral_m"]), float(feedback_changes),
+            ])
+            self.planning_risk_pub.publish(planning_risk)
 
             if self.pipeline.mapping.events:
                 event = String()
                 event.data = json.dumps(self.pipeline.mapping.events[-1])
                 self.events_pub.publish(event)
 
-        def _log_rerun(self, result):
+        def _log_rerun(self, result, plan):
             if not self.rerun_enabled:
                 return
             stats = result["stats"]
@@ -362,23 +371,39 @@ if ROS_AVAILABLE:
             rr.log("world/lidar/raw", rr.Points3D(result["points"]))
             rr.log("world/lidar/semantic", rr.Points3D(result["points"], colors=colors))
             rr.log("world/dynamics/moving_points", rr.Points3D(result["points"][result["moving"]]))
-            centers = np.array([t.center for t in result.get("tracks", [])], dtype=np.float32) if result.get("tracks") else np.empty((0, 3), dtype=np.float32)
+            centers = np.array([track.center for track in result.get("tracks", [])], dtype=np.float32) if result.get("tracks") else np.empty((0, 3), dtype=np.float32)
             rr.log("world/dynamics/tracks", rr.Points3D(centers))
             if len(map_points):
                 rr.log("world/map/elevation", rr.Points3D(map_points, colors=map_colors))
-                rr.log("world/map/adaptive_cells", rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))
+                rr.log("world/map/adaptive_cells", rr.Points3D(
+                    map_points,
+                    radii=0.04 + 0.03 * levels,
+                    colors=map_colors,
+                ))
+            parent_points, child_segments = self.pipeline.mapping.hierarchy_arrays()
+            if len(parent_points):
+                rr.log("world/map/hierarchy_parents", rr.Points3D(parent_points[:, :2].copy().astype(np.float32)))
+            if len(child_segments):
+                starts = child_segments[:, :2]
+                ends = child_segments[:, 2:4]
+                lines = np.stack([starts, ends], axis=1).astype(np.float32)
+                rr.log("world/map/hierarchy_edges", rr.LineStrips3D([lines[0]]) if len(lines) == 1 else rr.LineStrips3D(lines))
             if self.pipeline.mapping.events:
-                events = self.pipeline.mapping.events[-20:]
-                event_pts = np.array([[e["cell"][1], e["cell"][2], 0.05] for e in events], dtype=np.float32)
+                event_pts = np.array([
+                    [e["cell"][2], e["cell"][3], 0.05]
+                    for e in self.pipeline.mapping.events[-20:]
+                ], dtype=np.float32)
                 rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
-            plan = self.planner.plan(self.pipeline.mapping)
             rr.log("world/planning/local_path", rr.LineStrips3D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))
             rr.log("metrics/memory/active_cells", rr.Scalars([stats["active_cells"]]))
+            rr.log("metrics/hierarchy/nodes", rr.Scalars([len(self.pipeline.mapping.nodes)]))
             rr.log("metrics/topology_changes", rr.Scalars([stats["topology_changes"]]))
             rr.log("metrics/points", rr.Scalars([stats["points"]]))
             rr.log("metrics/moving_points", rr.Scalars([stats["moving_points"]]))
+            rr.log("metrics/planning/mean_risk", rr.Scalars([plan["mean_risk"]]))
+            rr.log("metrics/planning/max_risk", rr.Scalars([plan["max_risk"]]))
 
     def main(args=None):
         rclpy.init(args=args)
@@ -400,8 +425,10 @@ else:
     class FFEMNode:
         def __init__(self):
             raise RuntimeError("ROS 2 is not installed.")
+
     def main(args=None):
         raise RuntimeError("ROS 2 is not installed.")
+
 
 if __name__ == "__main__":
     main()

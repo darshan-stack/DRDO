@@ -200,7 +200,8 @@ class AdaptiveElevationMap:
         return True
 
     def _merge(self, parent):
-        if parent.level == 0 or len(parent.children) != 4:
+        """Merge four active leaf children back into their parent, including roots."""
+        if len(parent.children) != 4:
             return False
         children = [self.nodes[cid] for cid in parent.children if cid in self.nodes]
         if len(children) != 4 or not all(c.active and not c.children for c in children):
@@ -383,56 +384,26 @@ class AdaptiveElevationMap:
         levels = np.empty(len(active), dtype=np.int32)
         for i, node in enumerate(active):
             points[i] = [node.center[0], node.center[1], node.elevation]
-            probs = node.semantic_probs / max(float(node.semantic_probs.sum()), 1e-12)
-            uncertainty[i] = float(np.clip(-np.sum(probs * np.log(probs + 1e-8)) / np.log(self.cfg.num_classes), 0, 1))
             traversability[i] = node.traversability
+            uncertainty[i] = -float(np.sum(node.semantic_probs * np.log(node.semantic_probs + 1e-8)) / np.log(self.cfg.num_classes))
             attention[i] = node.attention
             levels[i] = node.level
         return points, traversability, uncertainty, attention, levels
 
-    def hierarchy_arrays(self):
-        parent_points = []
-        child_segments = []
-        for node in self.nodes.values():
-            if not node.children:
-                continue
-            px, py = node.center
-            parent_points.append([px, py, node.level])
-            for child_id in node.children:
-                child = self.nodes[child_id]
-                cx, cy = child.center
-                child_segments.append([px, py, cx, cy, child.level])
-        return np.asarray(parent_points, dtype=np.float32).reshape(-1, 3), np.asarray(child_segments, dtype=np.float32).reshape(-1, 5)
-
 
 class FFEMPipeline:
-    def __init__(self, config=None, seed=7, segmenter=None, motion_detector=None, tracker=None):
-        self.config = config or FFEMConfig()
-        self.sensor = SyntheticLidar(seed)
-        self.perception = MockPerception(self.config.num_classes)
-        self.segmenter = segmenter
-        self.motion_detector = motion_detector or VoxelMotionDetector()
-        self.tracker = tracker or CentroidTracker()
-        self.mapping = AdaptiveElevationMap(self.config)
-        self.history = []
+    """Convenience wrapper used by synthetic demos and tests."""
 
-    def process_points(self, points, intensity=None, motion=None, frame=0):
-        t0 = time.perf_counter()
-        points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
-        intensity = np.zeros(len(points), dtype=np.float32) if intensity is None else np.asarray(intensity, dtype=np.float32)
-        motion = self.motion_detector.detect(points) if motion is None else np.asarray(motion, dtype=np.float32)
-        if self.segmenter is not None:
-            _, probs = self.segmenter.predict(points, intensity)
-            inferred_motion = motion
-        else:
-            probs, inferred_motion = self.perception.infer(points, motion > 0.5, intensity)
-        motion = np.maximum(motion, inferred_motion)
-        stats = self.mapping.update(points, probs, motion, frame)
-        tracks = self.tracker.update(points, motion)
-        stats.update({"frame": frame, "total_ms": (time.perf_counter() - t0) * 1000, "points": len(points), "moving_points": int((motion > 0.5).sum()), "tracks": len(tracks)})
-        self.history.append(stats)
-        return {"points": points, "intensity": intensity, "moving": motion > 0.5, "motion_probability": motion, "semantic_probs": probs, "tracks": tracks, "stats": stats}
+    def __init__(self, cfg=None, seed=7):
+        self.cfg = cfg or FFEMConfig()
+        self.sensor = SyntheticLidar(seed=seed)
+        self.map = AdaptiveElevationMap(self.cfg)
+        self.motion = VoxelMotionDetector()
+        self.tracker = CentroidTracker()
+        self.perception = MockPerception()
 
     def step(self, frame):
         points, intensity, moving = self.sensor.frame(frame)
-        return self.process_points(points, intensity, moving.astype(np.float32), frame)
+        probs, _ = self.perception.infer(points, moving, intensity)
+        result = self.map.update(points, probs, moving, frame)
+        return {"frame": frame, **result}

@@ -147,6 +147,16 @@ Visualization Manager:
       Marker Topic: /ffem_mapper/refinement_markers
       Namespaces: {}
       Queue Size: 10
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Risk-Aware Local Path
+      Topic: /ffem_mapper/planning/path
+      Buffer Length: 1
+      Line Style: Lines
+      Line Width: 0.08
+      Color: 80; 255; 255
+      Alpha: 1
+      Pose Style: None
   Global Options:
     Background Color: 15; 15; 20
     Fixed Frame: lidar

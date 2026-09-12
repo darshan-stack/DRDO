@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-
 import numpy as np
 
 try:
@@ -28,24 +27,16 @@ from ffem.ros2.transforms import transform_points, transform_from_ros_transform
 
 try:
     import rerun as rr
-except ImportError:  # pragma: no cover
+except ImportError:
     rr = None
 
-SEMANTIC_PALETTE = np.array(
-    [
-        [90, 90, 90],
-        [70, 140, 220],
-        [70, 210, 100],
-        [180, 120, 60],
-        [230, 70, 60],
-        [220, 80, 180],
-        [245, 190, 40],
-    ], dtype=np.uint8
-)
+SEMANTIC_PALETTE = np.array([
+    [90, 90, 90], [70, 140, 220], [70, 210, 100],
+    [180, 120, 60], [230, 70, 60], [220, 80, 180], [245, 190, 40]
+], dtype=np.uint8)
 
 
 if ROS_AVAILABLE:
-
     class FFEMNode(Node):
         def __init__(self):
             super().__init__("ffem_mapper")
@@ -90,9 +81,7 @@ if ROS_AVAILABLE:
             backend = str(self.get_parameter("model_backend").value)
             checkpoint = str(self.get_parameter("checkpoint").value)
             segmenter, selected_checkpoint = build_segmenter(
-                backend,
-                checkpoint,
-                cfg.num_classes,
+                backend, checkpoint, cfg.num_classes,
                 int(self.get_parameter("range_height").value),
                 int(self.get_parameter("range_width").value),
                 float(self.get_parameter("max_range").value),
@@ -106,22 +95,9 @@ if ROS_AVAILABLE:
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self)
 
-            qos = QoSProfile(
-                depth=int(self.get_parameter("queue_depth").value),
-                history=HistoryPolicy.KEEP_LAST,
-                reliability=ReliabilityPolicy.BEST_EFFORT,
-            )
-            reliable_qos = QoSProfile(
-                depth=5,
-                history=HistoryPolicy.KEEP_LAST,
-                reliability=ReliabilityPolicy.RELIABLE,
-            )
-            self.sub = self.create_subscription(
-                PointCloud2,
-                str(self.get_parameter("input_topic").value),
-                self.callback,
-                qos,
-            )
+            qos = QoSProfile(depth=int(self.get_parameter("queue_depth").value), history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
+            reliable_qos = QoSProfile(depth=5, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
+            self.sub = self.create_subscription(PointCloud2, str(self.get_parameter("input_topic").value), self.callback, qos)
             self.map_pub = self.create_publisher(PointCloud2, str(self.get_parameter("map_topic").value), 5)
             self.semantic_pub = self.create_publisher(PointCloud2, str(self.get_parameter("semantic_topic").value), 5)
             self.moving_pub = self.create_publisher(PointCloud2, str(self.get_parameter("moving_topic").value), 5)
@@ -139,7 +115,6 @@ if ROS_AVAILABLE:
             self.rerun_enabled = bool(self.get_parameter("enable_rerun").value) and rr is not None
             if self.rerun_enabled:
                 rr.init("ffem-ros2", spawn=True)
-
             ckpt_text = selected_checkpoint if selected_checkpoint else "none (fallback)"
             self.get_logger().info(
                 f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
@@ -154,10 +129,7 @@ if ROS_AVAILABLE:
                 transform = self.tf_buffer.lookup_transform(self.map_frame, msg.header.frame_id, msg.header.stamp)
                 return transform_from_ros_transform(transform.transform)
             except (LookupException, ConnectivityException, ExtrapolationException) as exc:
-                self.get_logger().warning(
-                    f"TF unavailable {msg.header.frame_id}->{self.map_frame}: {exc}",
-                    throttle_duration_sec=5.0,
-                )
+                self.get_logger().warning(f"TF unavailable {msg.header.frame_id}->{self.map_frame}: {exc}", throttle_duration_sec=5.0)
                 return None
 
         def callback(self, msg):
@@ -177,12 +149,9 @@ if ROS_AVAILABLE:
                 points = transform_points(points, matrix)
                 result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
 
-                # First planning pass observes the current map. Its risk profile
-                # is fed back into cell criticality/refinement before the final
-                # path is generated for this frame.
-                preliminary_plan = self.planner.plan(self.pipeline.mapping)
+                preliminary = self.planner.plan(self.pipeline.mapping)
                 feedback_changes = self.pipeline.mapping.apply_planning_feedback(
-                    preliminary_plan["points"], preliminary_plan["risk_profile"], self.frame
+                    preliminary["points"], preliminary["risk_profile"], self.frame
                 )
                 final_plan = self.planner.plan(self.pipeline.mapping)
 
@@ -196,18 +165,9 @@ if ROS_AVAILABLE:
                     self.get_logger().info(
                         "frame=%d points=%d active_cells=%d hierarchy_nodes=%d moving=%d tracks=%d "
                         "feedback_refines=%d plan_cost=%.2f total_ms=%.2f classes=%s"
-                        % (
-                            self.frame,
-                            len(points),
-                            int(stats["active_cells"]),
-                            int(len(self.pipeline.mapping.nodes)),
-                            int(stats["moving_points"]),
-                            int(stats.get("tracks", 0)),
-                            int(feedback_changes),
-                            float(final_plan["cost"]),
-                            float(stats["total_ms"]),
-                            counts.tolist(),
-                        )
+                        % (self.frame, len(points), int(stats["active_cells"]), len(self.pipeline.mapping.nodes),
+                           int(stats["moving_points"]), int(stats.get("tracks", 0)), int(feedback_changes),
+                           float(final_plan["cost"]), float(stats["total_ms"]), counts.tolist())
                     )
             except Exception as exc:
                 self.get_logger().error(f"FFEM callback failed: {type(exc).__name__}: {exc}")
@@ -233,10 +193,7 @@ if ROS_AVAILABLE:
                 marker.scale.x = max(0.3, float(track.size[0]))
                 marker.scale.y = max(0.3, float(track.size[1]))
                 marker.scale.z = max(0.3, float(track.size[2]))
-                marker.color.r = 1.0
-                marker.color.g = 0.12
-                marker.color.b = 0.12
-                marker.color.a = 0.85
+                marker.color.r, marker.color.g, marker.color.b, marker.color.a = 1.0, 0.12, 0.12, 0.85
                 array.markers.append(marker)
                 text = Marker()
                 text.header = marker.header
@@ -302,41 +259,16 @@ if ROS_AVAILABLE:
         def _publish(self, result, stamp, plan, feedback_changes):
             map_points, _, _ = self.pipeline.mapping.arrays()
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
-
-            self.map_pub.publish(encode_pointcloud2(
-                map_points, frame_id=self.map_frame, stamp=stamp,
-                intensity=map_points[:, 2] if len(map_points) else None,
-            ))
-
+            self.map_pub.publish(encode_pointcloud2(map_points, frame_id=self.map_frame, stamp=stamp, intensity=map_points[:, 2] if len(map_points) else None))
             labels = np.argmax(result["semantic_probs"], axis=1).astype(np.int32)
-            self.semantic_pub.publish(encode_pointcloud2(
-                result["points"], frame_id=self.map_frame, stamp=stamp,
-                rgb=self._semantic_rgb(labels),
-            ))
-
+            self.semantic_pub.publish(encode_pointcloud2(result["points"], frame_id=self.map_frame, stamp=stamp, rgb=self._semantic_rgb(labels)))
             moving = result["points"][result["moving"]]
             moving_rgb = np.tile(np.array([[255, 45, 45]], dtype=np.uint8), (len(moving), 1))
-            self.moving_pub.publish(encode_pointcloud2(
-                moving, frame_id=self.map_frame, stamp=stamp,
-                rgb=moving_rgb,
-            ))
-
-            self.adaptive_pub.publish(encode_pointcloud2(
-                cell_points, frame_id=self.map_frame, stamp=stamp,
-                intensity=cell_levels.astype(np.float32),
-            ))
-            self.traversability_pub.publish(encode_pointcloud2(
-                cell_points, frame_id=self.map_frame, stamp=stamp,
-                intensity=traversability,
-            ))
-            self.uncertainty_pub.publish(encode_pointcloud2(
-                cell_points, frame_id=self.map_frame, stamp=stamp,
-                intensity=uncertainty,
-            ))
-            self.attention_pub.publish(encode_pointcloud2(
-                cell_points, frame_id=self.map_frame, stamp=stamp,
-                intensity=attention,
-            ))
+            self.moving_pub.publish(encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp, rgb=moving_rgb))
+            self.adaptive_pub.publish(encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=cell_levels.astype(np.float32)))
+            self.traversability_pub.publish(encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=traversability))
+            self.uncertainty_pub.publish(encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=uncertainty))
+            self.attention_pub.publish(encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=attention))
             self._publish_tracks(result.get("tracks", []))
             self._publish_refinement_markers()
             self._publish_planning_path(plan, stamp)
@@ -345,16 +277,12 @@ if ROS_AVAILABLE:
             self.metrics_pub.publish(Float32MultiArray(data=[
                 float(stats["total_ms"]), float(stats["map_ms"]), float(stats["active_cells"]),
                 float(stats["topology_changes"]), float(stats["points"]), float(stats["moving_points"]),
-                float(stats.get("tracks", 0)), float(len(self.pipeline.mapping.nodes)),
-                float(feedback_changes),
+                float(stats.get("tracks", 0)), float(len(self.pipeline.mapping.nodes)), float(feedback_changes),
             ]))
-
-            planning_risk = Float32MultiArray(data=[
+            self.planning_risk_pub.publish(Float32MultiArray(data=[
                 float(plan["mean_risk"]), float(plan["max_risk"]), float(plan["cost"]),
                 float(plan["target_lateral_m"]), float(feedback_changes),
-            ])
-            self.planning_risk_pub.publish(planning_risk)
-
+            ]))
             if self.pipeline.mapping.events:
                 event = String()
                 event.data = json.dumps(self.pipeline.mapping.events[-1])
@@ -375,24 +303,18 @@ if ROS_AVAILABLE:
             rr.log("world/dynamics/tracks", rr.Points3D(centers))
             if len(map_points):
                 rr.log("world/map/elevation", rr.Points3D(map_points, colors=map_colors))
-                rr.log("world/map/adaptive_cells", rr.Points3D(
-                    map_points,
-                    radii=0.04 + 0.03 * levels,
-                    colors=map_colors,
-                ))
+                rr.log("world/map/adaptive_cells", rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))
             parent_points, child_segments = self.pipeline.mapping.hierarchy_arrays()
             if len(parent_points):
                 rr.log("world/map/hierarchy_parents", rr.Points3D(parent_points[:, :2].copy().astype(np.float32)))
             if len(child_segments):
-                starts = child_segments[:, :2]
-                ends = child_segments[:, 2:4]
-                lines = np.stack([starts, ends], axis=1).astype(np.float32)
-                rr.log("world/map/hierarchy_edges", rr.LineStrips3D([lines[0]]) if len(lines) == 1 else rr.LineStrips3D(lines))
+                segments = [
+                    np.asarray([[s[0], s[1], 0.0], [s[2], s[3], 0.0]], dtype=np.float32)
+                    for s in child_segments
+                ]
+                rr.log("world/map/hierarchy_edges", rr.LineStrips3D(segments))
             if self.pipeline.mapping.events:
-                event_pts = np.array([
-                    [e["cell"][2], e["cell"][3], 0.05]
-                    for e in self.pipeline.mapping.events[-20:]
-                ], dtype=np.float32)
+                event_pts = np.array([[e["cell"][2], e["cell"][3], 0.05] for e in self.pipeline.mapping.events[-20:]], dtype=np.float32)
                 rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
             rr.log("world/planning/local_path", rr.LineStrips3D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
@@ -420,12 +342,10 @@ if ROS_AVAILABLE:
                 node.get_logger().info(f"Saved Rerun recording to {recording}")
             node.destroy_node()
             rclpy.shutdown()
-
 else:
     class FFEMNode:
         def __init__(self):
             raise RuntimeError("ROS 2 is not installed.")
-
     def main(args=None):
         raise RuntimeError("ROS 2 is not installed.")
 

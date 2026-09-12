@@ -54,7 +54,7 @@ class HierarchyNode:
     def center(self) -> tuple[float, float]:
         _, _, ix, iy = self.node_id
         s = self.size
-        return (float((ix + 0.5) * s), float((iy + 0.5) * s))
+        return float((ix + 0.5) * s), float((iy + 0.5) * s)
 
 
 class SyntheticLidar:
@@ -82,11 +82,7 @@ class MockPerception:
         labels[(points[:, 2] > 0.25) & ~moving] = 1
         labels[(intensity > 0.72) & ~moving] = 2
         labels[moving] = 3
-        probs = np.full(
-            (len(points), self.num_classes),
-            0.04 / max(1, self.num_classes - 1),
-            dtype=np.float32,
-        )
+        probs = np.full((len(points), self.num_classes), 0.04 / max(1, self.num_classes - 1), dtype=np.float32)
         probs[np.arange(len(points)), labels] = 0.96
         return probs, moving.astype(np.float32)
 
@@ -124,11 +120,7 @@ class AdaptiveElevationMap:
             count=int(stats.get("count", 0)),
             elevation=float(stats.get("elevation", 0.0)),
             variance=float(stats.get("variance", 0.0)),
-            semantic_probs=np.array(
-                stats.get("semantic_probs", np.ones(self.cfg.num_classes) / self.cfg.num_classes),
-                dtype=np.float64,
-                copy=True,
-            ),
+            semantic_probs=np.array(stats.get("semantic_probs", np.ones(self.cfg.num_classes) / self.cfg.num_classes), dtype=np.float64, copy=True),
             motion_probability=float(stats.get("motion_probability", 0.0)),
             traversability=float(stats.get("traversability", 0.0)),
             attention=float(stats.get("attention", 0.0)),
@@ -144,8 +136,29 @@ class AdaptiveElevationMap:
             self.leaves.add(root_id)
         return root_id
 
+    def peek_leaf(self, x, y):
+        """Return an existing leaf without creating unknown map cells."""
+        root_id = self._root_id(x, y)
+        if root_id not in self.nodes or root_id not in self.leaves:
+            return None
+        node_id = root_id
+        while True:
+            node = self.nodes[node_id]
+            if not node.children:
+                return node_id if node_id in self.leaves and node.active else None
+            band, level, ix, iy = node_id
+            size = float(self._sizes[band]) / (2 ** level)
+            cx = (ix + 0.5) * size
+            cy = (iy + 0.5) * size
+            dx = 1 if x >= cx else 0
+            dy = 1 if y >= cy else 0
+            child_id = (band, level + 1, ix * 2 + dx, iy * 2 + dy)
+            if child_id not in self.nodes:
+                return node_id if node_id in self.leaves else None
+            node_id = child_id
+
     def locate_leaf(self, x, y):
-        """Return the current leaf containing x,y."""
+        """Return or create the current leaf containing x,y."""
         node_id = self._ensure_root(x, y)
         while True:
             node = self.nodes[node_id]
@@ -153,12 +166,12 @@ class AdaptiveElevationMap:
                 return node_id
             band, level, ix, iy = node_id
             size = float(self._sizes[band]) / (2 ** level)
-            center_x = (ix + 0.5) * size
-            center_y = (iy + 0.5) * size
-            dx = 1 if x >= center_x else 0
-            dy = 1 if y >= center_y else 0
+            cx = (ix + 0.5) * size
+            cy = (iy + 0.5) * size
+            dx = 1 if x >= cx else 0
+            dy = 1 if y >= cy else 0
             child_id = (band, level + 1, ix * 2 + dx, iy * 2 + dy)
-            if child_id not in self.nodes:
+            if child_id not in self.nodes or child_id not in self.leaves:
                 return node_id
             node_id = child_id
 
@@ -214,16 +227,43 @@ class AdaptiveElevationMap:
     def _aggregate(inv, values, groups):
         return np.bincount(inv, weights=np.asarray(values, dtype=np.float64), minlength=groups)
 
+    def _enforce_capacity(self):
+        while len(self.leaves) > self.cfg.max_active_cells:
+            parents = {}
+            for leaf_id in self.leaves:
+                parent_id = self.nodes[leaf_id].parent
+                if parent_id is not None:
+                    parents.setdefault(parent_id, []).append(leaf_id)
+            merged = False
+            parent_candidates = []
+            for parent_id, child_ids in parents.items():
+                parent = self.nodes[parent_id]
+                siblings = [self.nodes[cid] for cid in parent.children if cid in self.nodes]
+                if len(siblings) == 4 and all(s.active and not s.children for s in siblings):
+                    score = float(np.mean([s.attention for s in siblings]))
+                    parent_candidates.append((score, parent))
+            for _, parent in sorted(parent_candidates, key=lambda x: x[0]):
+                if self._merge(parent):
+                    merged = True
+                    break
+            if merged:
+                continue
+            root_candidates = [self.nodes[nid] for nid in self.leaves if self.nodes[nid].level == 0]
+            if root_candidates:
+                root = min(root_candidates, key=lambda n: n.attention)
+                self.leaves.discard(root.node_id)
+                root.active = False
+                continue
+            break
+
     def update(self, points, semantic_probs, motion, frame):
         t0 = time.perf_counter()
         points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
-        n = len(points)
-        if n == 0:
-            return {"map_ms": (time.perf_counter() - t0) * 1000, "active_cells": len(self.leaves), "topology_changes": 0}
-
+        if len(points) == 0:
+            return {"map_ms": (time.perf_counter() - t0) * 1000, "active_cells": len(self.leaves), "topology_changes": 0, "hierarchy_nodes": len(self.nodes)}
         leaf_ids = [self.locate_leaf(float(x), float(y)) for x, y in points[:, :2]]
         key_dtype = [("b", "i2"), ("l", "i1"), ("x", "i8"), ("y", "i8")]
-        keys = np.empty(n, dtype=key_dtype)
+        keys = np.empty(len(points), dtype=key_dtype)
         keys["b"] = [node_id[0] for node_id in leaf_ids]
         keys["l"] = [node_id[1] for node_id in leaf_ids]
         keys["x"] = [node_id[2] for node_id in leaf_ids]
@@ -232,17 +272,15 @@ class AdaptiveElevationMap:
         groups = len(unique_keys)
         counts = np.bincount(inverse, minlength=groups).astype(np.float64)
         z = points[:, 2].astype(np.float64)
-        sum_z = self._aggregate(inverse, z, groups)
-        mean_z = sum_z / np.maximum(counts, 1)
+        mean_z = self._aggregate(inverse, z, groups) / np.maximum(counts, 1)
         variance = self._aggregate(inverse, (z - mean_z[inverse]) ** 2, groups) / np.maximum(counts, 1)
         motion_mean = self._aggregate(inverse, np.asarray(motion).reshape(-1), groups) / np.maximum(counts, 1)
         probs = np.asarray(semantic_probs, dtype=np.float32)
-        if probs.ndim != 2 or probs.shape[0] != n:
+        if probs.ndim != 2 or probs.shape[0] != len(points):
             raise ValueError("semantic_probs must have shape [N, num_classes]")
         class_means = np.empty((groups, self.cfg.num_classes), dtype=np.float64)
         for class_id in range(self.cfg.num_classes):
             class_means[:, class_id] = self._aggregate(inverse, probs[:, class_id], groups) / np.maximum(counts, 1)
-
         for gi in range(groups):
             node_id = (int(unique_keys["b"][gi]), int(unique_keys["l"][gi]), int(unique_keys["x"][gi]), int(unique_keys["y"][gi]))
             node = self.nodes[node_id]
@@ -259,12 +297,12 @@ class AdaptiveElevationMap:
             range_term = min(1.0, np.hypot(x, y) / 50.0)
             node.planning_criticality *= 0.90
             node.attention = float(np.clip(
-                self.cfg.semantic_weight * entropy
-                + self.cfg.motion_weight * node.motion_probability
-                + self.cfg.traversability_weight * node.traversability
-                + self.cfg.geometry_weight * min(1.0, 4 * node.variance)
-                + self.cfg.range_weight * range_term
-                + self.cfg.planning_weight * node.planning_criticality,
+                self.cfg.semantic_weight * entropy +
+                self.cfg.motion_weight * node.motion_probability +
+                self.cfg.traversability_weight * node.traversability +
+                self.cfg.geometry_weight * min(1.0, 4 * node.variance) +
+                self.cfg.range_weight * range_term +
+                self.cfg.planning_weight * node.planning_criticality,
                 0,
                 1,
             ))
@@ -275,18 +313,8 @@ class AdaptiveElevationMap:
         for node in refine[:self.cfg.max_topology_changes]:
             old_level = node.level
             if self._split(node):
-                self.events.append({
-                    "frame": frame,
-                    "cell": node.node_id,
-                    "old_level": old_level,
-                    "new_level": old_level + 1,
-                    "reason": "attention",
-                    "score": node.attention,
-                    "hierarchy": "split_4",
-                    "parent": node.node_id,
-                })
+                self.events.append({"frame": frame, "cell": node.node_id, "old_level": old_level, "new_level": old_level + 1, "reason": "attention", "score": node.attention, "hierarchy": "split_4", "parent": node.node_id})
                 changes += 1
-
         if changes < self.cfg.max_topology_changes:
             visited_parents = set()
             for leaf_id in list(self.leaves):
@@ -302,37 +330,14 @@ class AdaptiveElevationMap:
                     continue
                 parent.quiet_frames += 1
                 visited_parents.add(parent.node_id)
-                if parent.quiet_frames >= self.cfg.dwell_frames and changes < self.cfg.max_topology_changes:
-                    if self._merge(parent):
-                        self.events.append({
-                            "frame": frame,
-                            "cell": parent.node_id,
-                            "old_level": parent.level + 1,
-                            "new_level": parent.level,
-                            "reason": "hysteresis",
-                            "score": parent.attention,
-                            "hierarchy": "merge_4",
-                            "parent": parent.node_id,
-                        })
-                        changes += 1
-
-        if len(self.leaves) > self.cfg.max_active_cells:
-            excess = len(self.leaves) - self.cfg.max_active_cells
-            drop = sorted(self.leaves, key=lambda nid: (self.nodes[nid].attention, self.nodes[nid].level))[:excess]
-            for node_id in drop:
-                self.leaves.discard(node_id)
-                self.nodes[node_id].active = False
-
+                if parent.quiet_frames >= self.cfg.dwell_frames and changes < self.cfg.max_topology_changes and self._merge(parent):
+                    self.events.append({"frame": frame, "cell": parent.node_id, "old_level": parent.level + 1, "new_level": parent.level, "reason": "hysteresis", "score": parent.attention, "hierarchy": "merge_4", "parent": parent.node_id})
+                    changes += 1
+        self._enforce_capacity()
         self.cells = {node_id: self.nodes[node_id] for node_id in self.leaves}
-        return {
-            "map_ms": (time.perf_counter() - t0) * 1000,
-            "active_cells": len(self.leaves),
-            "topology_changes": changes,
-            "hierarchy_nodes": len(self.nodes),
-        }
+        return {"map_ms": (time.perf_counter() - t0) * 1000, "active_cells": len(self.leaves), "topology_changes": changes, "hierarchy_nodes": len(self.nodes)}
 
     def apply_planning_feedback(self, plan_points, risk_profile, frame):
-        """Feed planner-critical regions back into map attention/refinement."""
         points = np.asarray(plan_points, dtype=np.float32).reshape(-1, 2)
         risks = np.asarray(risk_profile, dtype=np.float32).reshape(-1) if len(points) else np.empty((0,), dtype=np.float32)
         changes = 0
@@ -344,47 +349,39 @@ class AdaptiveElevationMap:
             if node.level < self.cfg.max_level and node.attention >= self.cfg.refine_threshold and changes < self.cfg.max_topology_changes:
                 old_level = node.level
                 if self._split(node):
-                    self.events.append({
-                        "frame": frame,
-                        "cell": node.node_id,
-                        "old_level": old_level,
-                        "new_level": old_level + 1,
-                        "reason": "planning_feedback",
-                        "score": node.attention,
-                        "hierarchy": "split_4",
-                        "parent": node.node_id,
-                    })
+                    self.events.append({"frame": frame, "cell": node.node_id, "old_level": old_level, "new_level": old_level + 1, "reason": "planning_feedback", "score": node.attention, "hierarchy": "split_4", "parent": node.node_id})
                     changes += 1
+        self._enforce_capacity()
         self.cells = {node_id: self.nodes[node_id] for node_id in self.leaves}
         return changes
 
     def arrays(self):
-        active_nodes = [self.nodes[node_id] for node_id in self.leaves if self.nodes[node_id].active]
-        if not active_nodes:
+        active = [self.nodes[nid] for nid in self.leaves if self.nodes[nid].active]
+        if not active:
             return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), np.empty((0,))
-        points = np.empty((len(active_nodes), 3), dtype=np.float32)
-        colors = np.empty((len(active_nodes), 3), dtype=np.uint8)
-        levels = np.empty(len(active_nodes), dtype=np.int8)
+        points = np.empty((len(active), 3), dtype=np.float32)
+        colors = np.empty((len(active), 3), dtype=np.uint8)
+        levels = np.empty(len(active), dtype=np.int8)
         palette = np.array([[90, 90, 90], [70, 140, 220], [70, 210, 100], [180, 120, 60], [230, 70, 60], [220, 80, 180], [245, 190, 40]], dtype=np.uint8)
-        for i, node in enumerate(active_nodes):
+        for i, node in enumerate(active):
             points[i] = [node.center[0], node.center[1], node.elevation]
             colors[i] = palette[int(np.argmax(node.semantic_probs))]
             levels[i] = node.level
         return points, colors, levels
 
     def diagnostics(self):
-        active_nodes = [self.nodes[node_id] for node_id in self.leaves if self.nodes[node_id].active]
-        if not active_nodes:
+        active = [self.nodes[nid] for nid in self.leaves if self.nodes[nid].active]
+        if not active:
             empty3 = np.empty((0, 3), dtype=np.float32)
             empty = np.empty((0,), dtype=np.float32)
             empty_i = np.empty((0,), dtype=np.int32)
             return empty3, empty, empty, empty, empty_i
-        points = np.empty((len(active_nodes), 3), dtype=np.float32)
-        traversability = np.empty(len(active_nodes), dtype=np.float32)
-        uncertainty = np.empty(len(active_nodes), dtype=np.float32)
-        attention = np.empty(len(active_nodes), dtype=np.float32)
-        levels = np.empty(len(active_nodes), dtype=np.int32)
-        for i, node in enumerate(active_nodes):
+        points = np.empty((len(active), 3), dtype=np.float32)
+        traversability = np.empty(len(active), dtype=np.float32)
+        uncertainty = np.empty(len(active), dtype=np.float32)
+        attention = np.empty(len(active), dtype=np.float32)
+        levels = np.empty(len(active), dtype=np.int32)
+        for i, node in enumerate(active):
             points[i] = [node.center[0], node.center[1], node.elevation]
             probs = node.semantic_probs / max(float(node.semantic_probs.sum()), 1e-12)
             uncertainty[i] = float(np.clip(-np.sum(probs * np.log(probs + 1e-8)) / np.log(self.cfg.num_classes), 0, 1))
@@ -432,23 +429,9 @@ class FFEMPipeline:
         motion = np.maximum(motion, inferred_motion)
         stats = self.mapping.update(points, probs, motion, frame)
         tracks = self.tracker.update(points, motion)
-        stats.update({
-            "frame": frame,
-            "total_ms": (time.perf_counter() - t0) * 1000,
-            "points": len(points),
-            "moving_points": int((motion > 0.5).sum()),
-            "tracks": len(tracks),
-        })
+        stats.update({"frame": frame, "total_ms": (time.perf_counter() - t0) * 1000, "points": len(points), "moving_points": int((motion > 0.5).sum()), "tracks": len(tracks)})
         self.history.append(stats)
-        return {
-            "points": points,
-            "intensity": intensity,
-            "moving": motion > 0.5,
-            "motion_probability": motion,
-            "semantic_probs": probs,
-            "tracks": tracks,
-            "stats": stats,
-        }
+        return {"points": points, "intensity": intensity, "moving": motion > 0.5, "motion_probability": motion, "semantic_probs": probs, "tracks": tracks, "stats": stats}
 
     def step(self, frame):
         points, intensity, moving = self.sensor.frame(frame)

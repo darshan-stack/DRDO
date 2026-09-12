@@ -35,7 +35,6 @@ SEMANTIC_PALETTE = np.array([
     [180, 120, 60], [230, 70, 60], [220, 80, 180], [245, 190, 40]
 ], dtype=np.uint8)
 
-
 if ROS_AVAILABLE:
     class FFEMNode(Node):
         def __init__(self):
@@ -148,13 +147,9 @@ if ROS_AVAILABLE:
                     return
                 points = transform_points(points, matrix)
                 result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
-
                 preliminary = self.planner.plan(self.pipeline.mapping)
-                feedback_changes = self.pipeline.mapping.apply_planning_feedback(
-                    preliminary["points"], preliminary["risk_profile"], self.frame
-                )
+                feedback_changes = self.pipeline.mapping.apply_planning_feedback(preliminary["points"], preliminary["risk_profile"], self.frame)
                 final_plan = self.planner.plan(self.pipeline.mapping)
-
                 self._publish(result, msg.header.stamp, final_plan, feedback_changes)
                 self._log_rerun(result, final_plan)
                 self.frame += 1
@@ -163,8 +158,7 @@ if ROS_AVAILABLE:
                     labels = np.argmax(result["semantic_probs"], axis=1)
                     counts = np.bincount(labels, minlength=self.pipeline.config.num_classes)
                     self.get_logger().info(
-                        "frame=%d points=%d active_cells=%d hierarchy_nodes=%d moving=%d tracks=%d "
-                        "feedback_refines=%d plan_cost=%.2f total_ms=%.2f classes=%s"
+                        "frame=%d points=%d active_cells=%d hierarchy_nodes=%d moving=%d tracks=%d feedback_refines=%d plan_cost=%.2f total_ms=%.2f classes=%s"
                         % (self.frame, len(points), int(stats["active_cells"]), len(self.pipeline.mapping.nodes),
                            int(stats["moving_points"]), int(stats.get("tracks", 0)), int(feedback_changes),
                            float(final_plan["cost"]), float(stats["total_ms"]), counts.tolist())
@@ -272,7 +266,6 @@ if ROS_AVAILABLE:
             self._publish_tracks(result.get("tracks", []))
             self._publish_refinement_markers()
             self._publish_planning_path(plan, stamp)
-
             stats = result["stats"]
             self.metrics_pub.publish(Float32MultiArray(data=[
                 float(stats["total_ms"]), float(stats["map_ms"]), float(stats["active_cells"]),
@@ -304,19 +297,14 @@ if ROS_AVAILABLE:
             if len(map_points):
                 rr.log("world/map/elevation", rr.Points3D(map_points, colors=map_colors))
                 rr.log("world/map/adaptive_cells", rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))
-            parent_points, child_segments = self.pipeline.mapping.hierarchy_arrays()
+            parent_points, _ = self.pipeline.mapping.hierarchy_arrays()
             if len(parent_points):
-                rr.log("world/map/hierarchy_parents", rr.Points3D(parent_points[:, :2].copy().astype(np.float32)))
-            if len(child_segments):
-                segments = [
-                    np.asarray([[s[0], s[1], 0.0], [s[2], s[3], 0.0]], dtype=np.float32)
-                    for s in child_segments
-                ]
-                rr.log("world/map/hierarchy_edges", rr.LineStrips3D(segments))
+                parent_cloud = np.column_stack([parent_points[:, 0], parent_points[:, 1], np.zeros(len(parent_points), dtype=np.float32)])
+                rr.log("world/map/hierarchy_parents", rr.Points3D(parent_cloud))
             if self.pipeline.mapping.events:
                 event_pts = np.array([[e["cell"][2], e["cell"][3], 0.05] for e in self.pipeline.mapping.events[-20:]], dtype=np.float32)
                 rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
-            rr.log("world/planning/local_path", rr.LineStrips3D([plan["points"]]))
+            rr.log("world/planning/local_path", rr.LineStrips2D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))
             rr.log("metrics/memory/active_cells", rr.Scalars([stats["active_cells"]]))
@@ -348,7 +336,6 @@ else:
             raise RuntimeError("ROS 2 is not installed.")
     def main(args=None):
         raise RuntimeError("ROS 2 is not installed.")
-
 
 if __name__ == "__main__":
     main()

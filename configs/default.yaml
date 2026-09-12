@@ -14,20 +14,22 @@ sensor:
 mapping:
   base_cell_size_m: 0.50
   finest_cell_size_m: 0.05
-  radial_bands_m: [0.0, 10.0, 30.0, 60.0, 100.0]
+  radial_bands_m: [0.0, 8.0, 18.0, 40.0, 100.0]
   radial_cell_sizes_m: [0.05, 0.10, 0.25, 0.50]
   max_level: 2
+  hierarchy: explicit_4ary
   min_observations_for_slice: 8
   slice_separation_m: 0.35
   elevation_variance_limit: 0.25
 
 adaptation:
-  mode: ffem
-  semantic_weight: 0.30
-  motion_weight: 0.30
-  traversability_weight: 0.20
-  geometry_weight: 0.15
+  mode: ffem_feedback
+  semantic_weight: 0.27
+  motion_weight: 0.27
+  traversability_weight: 0.18
+  geometry_weight: 0.13
   range_weight: 0.05
+  planning_weight: 0.10
   refine_threshold: 0.60
   merge_threshold: 0.25
   dwell_frames: 5
@@ -36,7 +38,7 @@ adaptation:
   predictive_dilation_frames: 2
 
 perception:
-  backend: auto
+  backend: torch_range
   checkpoint: models/checkpoints/semanticposs_range_model.pt
   num_classes: 7
   range_height: 32
@@ -47,6 +49,13 @@ perception:
   motion_voxel_m: 0.35
   motion_threshold_m: 0.45
 
+planning:
+  mode: risk_aware_local
+  lookahead_m: 18.0
+  lateral_limit_m: 4.0
+  lateral_step_m: 0.5
+  feedback_into_mapping: true
+
 visualization:
   application_id: ffem-lidar-mapping
   log_raw_points: true
@@ -54,4 +63,5 @@ visualization:
   log_dynamics: true
   log_elevation: true
   log_adaptive_cells: true
+  log_planning_path: true
   log_metrics: true

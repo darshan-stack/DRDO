@@ -112,6 +112,20 @@ class AdaptiveElevationMap:
         pal=np.array([[90,90,90],[70,140,220],[70,210,100],[180,120,60],[230,70,60],[220,80,180],[245,190,40]],dtype=np.uint8)
         for i,c in enumerate(cells): s=c.size; pts[i]=[(c.key[1]+.5)*s,(c.key[2]+.5)*s,c.elevation]; colors[i]=pal[int(np.argmax(c.semantic_probs))]; levels[i]=c.level
         return pts,colors,levels
+    def diagnostics(self):
+        """Return per-cell arrays for RViz/dashboard diagnostic layers."""
+        if not self.cells:
+            empty3=np.empty((0,3),dtype=np.float32); empty=np.empty((0,),dtype=np.float32)
+            return empty3, empty, empty, empty, empty, np.empty((0,),dtype=np.int32)
+        cells=tuple(self.cells.values()); n=len(cells)
+        pts=np.empty((n,3),dtype=np.float32); traversability=np.empty(n,dtype=np.float32)
+        uncertainty=np.empty(n,dtype=np.float32); attention=np.empty(n,dtype=np.float32); levels=np.empty(n,dtype=np.int32)
+        for i,c in enumerate(cells):
+            s=c.size; pts[i]=[(c.key[1]+0.5)*s,(c.key[2]+0.5)*s,c.elevation]
+            probs=np.asarray(c.semantic_probs,dtype=np.float64); probs=probs/max(float(probs.sum()),1e-12)
+            uncertainty[i]=float(np.clip(-np.sum(probs*np.log(probs+1e-8))/np.log(self.cfg.num_classes),0,1))
+            traversability[i]=float(c.traversability); attention[i]=float(c.attention); levels[i]=int(c.level)
+        return pts,traversability,uncertainty,attention,levels
 
 class FFEMPipeline:
     def __init__(self,config=None,seed=7,segmenter=None,motion_detector=None,tracker=None):
@@ -121,6 +135,6 @@ class FFEMPipeline:
         if self.segmenter is not None: _,probs=self.segmenter.predict(points,intensity); inferred_motion=motion
         else: probs,inferred_motion=self.perception.infer(points,motion>.5,intensity)
         motion=np.maximum(motion,inferred_motion); stats=self.mapping.update(points,probs,motion,frame); tracks=self.tracker.update(points,motion); stats.update({'frame':frame,'total_ms':(time.perf_counter()-t0)*1000,'points':len(points),'moving_points':int((motion>.5).sum()),'tracks':len(tracks)}); self.history.append(stats)
-        return {'points':points,'intensity':intensity,'moving':motion>.5,'motion_probability':motion,'semantic_probs':probs,'stats':stats}
+        return {'points':points,'intensity':intensity,'moving':motion>.5,'motion_probability':motion,'semantic_probs':probs,'tracks':tracks,'stats':stats}
     def step(self,frame):
         p,i,m=self.sensor.frame(frame); return self.process_points(p,i,m.astype(np.float32),frame)

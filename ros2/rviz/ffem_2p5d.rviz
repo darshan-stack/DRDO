@@ -1,0 +1,159 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: XY Grid
+      Cell Size: 1
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Raw LiDAR
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /carla/hero/lidar/point_cloud
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 220; 220; 220
+      Alpha: 0.55
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Semantic LiDAR
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /ffem_mapper/map/semantic
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: RGB8
+      Alpha: 0.95
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: 2.5D Elevation Map
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ffem_mapper/map/elevation
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: AxisColor
+      Axis: Z
+      Alpha: 1
+      Min Value: -3.0
+      Max Value: 10.0
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Adaptive Cells / Resolution Level
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ffem_mapper/map/adaptive_cells
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Min Color: 0; 255; 0
+      Max Color: 255; 0; 0
+      Min Value: 0
+      Max Value: 2
+      Alpha: 0.9
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: false
+      Name: Traversability Cost
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ffem_mapper/map/traversability
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Min Color: 0; 255; 0
+      Max Color: 255; 0; 0
+      Min Value: 0
+      Max Value: 1
+      Alpha: 0.9
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: false
+      Name: Semantic Uncertainty
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ffem_mapper/map/uncertainty
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Min Color: 0; 255; 0
+      Max Color: 255; 0; 0
+      Min Value: 0
+      Max Value: 1
+      Alpha: 0.9
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Adaptive Attention
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ffem_mapper/map/attention
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Min Color: 0; 180; 255
+      Max Color: 255; 80; 0
+      Min Value: 0
+      Max Value: 1
+      Alpha: 0.8
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Moving Points
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /ffem_mapper/map/moving_points
+      Style: Points
+      Size (Pixels): 6
+      Color Transformer: FlatColor
+      Color: 255; 30; 30
+      Alpha: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Dynamic Tracks
+      Marker Topic: /ffem_mapper/tracks
+      Namespaces: {}
+      Queue Size: 10
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Refinement Events
+      Marker Topic: /ffem_mapper/refinement_events
+  Global Options:
+    Background Color: 15; 15; 20
+    Fixed Frame: lidar
+    Frame Rate: 20
+  Name: FFEM 2.5D Mapping
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Value: true

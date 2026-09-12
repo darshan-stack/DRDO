@@ -62,7 +62,6 @@ if ROS_AVAILABLE:
             self.declare_parameter("max_level", 2)
             self.declare_parameter("max_active_cells", 20000)
             self.declare_parameter("max_topology_changes", 32)
-            self.declare_parameter("queue_depth", 5)
             self.declare_parameter("map_topic", "~/map/elevation")
             self.declare_parameter("semantic_topic", "~/map/semantic")
             self.declare_parameter("moving_topic", "~/map/moving_points")
@@ -73,6 +72,7 @@ if ROS_AVAILABLE:
             self.declare_parameter("metrics_topic", "~/metrics")
             self.declare_parameter("events_topic", "~/refinement_events")
             self.declare_parameter("tracks_topic", "~/tracks")
+            self.declare_parameter("refinement_markers_topic", "~/refinement_markers")
             self.declare_parameter("planning_risk_topic", "~/planning/risk")
 
             cfg = FFEMConfig(
@@ -104,6 +104,11 @@ if ROS_AVAILABLE:
                 history=HistoryPolicy.KEEP_LAST,
                 reliability=ReliabilityPolicy.BEST_EFFORT,
             )
+            reliable_qos = QoSProfile(
+                depth=5,
+                history=HistoryPolicy.KEEP_LAST,
+                reliability=ReliabilityPolicy.RELIABLE,
+            )
             self.sub = self.create_subscription(
                 PointCloud2,
                 str(self.get_parameter("input_topic").value), self.callback, qos
@@ -118,6 +123,7 @@ if ROS_AVAILABLE:
             self.metrics_pub = self.create_publisher(Float32MultiArray, str(self.get_parameter("metrics_topic").value), 5)
             self.events_pub = self.create_publisher(String, str(self.get_parameter("events_topic").value), 5)
             self.tracks_pub = self.create_publisher(MarkerArray, str(self.get_parameter("tracks_topic").value), 5)
+            self.refinement_markers_pub = self.create_publisher(MarkerArray, str(self.get_parameter("refinement_markers_topic").value), reliable_qos)
             self.planning_risk_pub = self.create_publisher(Float32MultiArray, str(self.get_parameter("planning_risk_topic").value), 5)
 
             self.rerun_enabled = bool(self.get_parameter("enable_rerun").value) and rr is not None
@@ -182,7 +188,7 @@ if ROS_AVAILABLE:
 
         def _publish_tracks(self, tracks):
             array = MarkerArray()
-            for idx, track in enumerate(tracks):
+            for track in tracks:
                 marker = Marker()
                 marker.header.frame_id = self.map_frame
                 marker.header.stamp = self.get_clock().now().to_msg()
@@ -219,14 +225,44 @@ if ROS_AVAILABLE:
                 array.markers.append(text)
             self.tracks_pub.publish(array)
 
+        def _publish_refinement_markers(self):
+            array = MarkerArray()
+            clear = Marker()
+            clear.action = Marker.DELETEALL
+            array.markers.append(clear)
+            for i, event in enumerate(self.pipeline.mapping.events[-32:]):
+                b, ix, iy = event["cell"]
+                band_size = float(self.pipeline.mapping._sizes[int(b)])
+                level = int(event["new_level"])
+                s = band_size / (2 ** level)
+                m = Marker()
+                m.header.frame_id = self.map_frame
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.ns = "ffem_refinement"
+                m.id = i
+                m.type = Marker.CUBE
+                m.action = Marker.ADD
+                m.pose.position.x = (ix + 0.5) * s
+                m.pose.position.y = (iy + 0.5) * s
+                m.pose.position.z = 0.15
+                m.scale.x = max(s * 0.9, 0.05)
+                m.scale.y = max(s * 0.9, 0.05)
+                m.scale.z = 0.08
+                if event["reason"] == "attention":
+                    m.color.r, m.color.g, m.color.b = 1.0, 0.55, 0.05
+                else:
+                    m.color.r, m.color.g, m.color.b = 0.1, 0.5, 1.0
+                m.color.a = 0.7
+                array.markers.append(m)
+            self.refinement_markers_pub.publish(array)
+
         def _publish(self, result, stamp):
-            map_points, map_colors, levels = self.pipeline.mapping.arrays()
+            map_points, _, _ = self.pipeline.mapping.arrays()
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
 
             self.map_pub.publish(
                 encode_pointcloud2(
                     map_points, frame_id=self.map_frame, stamp=stamp,
-                    rgb=None,
                     intensity=map_points[:, 2] if len(map_points) else None,
                 )
             )
@@ -255,6 +291,7 @@ if ROS_AVAILABLE:
                 encode_pointcloud2(cell_points, frame_id=self.map_frame, stamp=stamp, intensity=attention)
             )
             self._publish_tracks(result.get("tracks", []))
+            self._publish_refinement_markers()
 
             stats = result["stats"]
             msg = Float32MultiArray()
@@ -292,7 +329,8 @@ if ROS_AVAILABLE:
             rr.log("world/lidar/raw", rr.Points3D(result["points"]))
             rr.log("world/lidar/semantic", rr.Points3D(result["points"], colors=colors))
             rr.log("world/dynamics/moving_points", rr.Points3D(result["points"][result["moving"]]))
-            rr.log("world/dynamics/tracks", rr.Points3D(np.array([t.center for t in result.get("tracks", [])], dtype=np.float32)) if result.get("tracks") else rr.Points3D(np.empty((0, 3), dtype=np.float32)))
+            centers = np.array([t.center for t in result.get("tracks", [])], dtype=np.float32) if result.get("tracks") else np.empty((0, 3), dtype=np.float32)
+            rr.log("world/dynamics/tracks", rr.Points3D(centers))
             if len(map_points):
                 rr.log("world/map/elevation", rr.Points3D(map_points, colors=map_colors))
                 rr.log("world/map/adaptive_cells", rr.Points3D(map_points, radii=0.04 + 0.03 * levels, colors=map_colors))

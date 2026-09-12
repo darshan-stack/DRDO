@@ -54,9 +54,9 @@ class FFEMPathFollower(Node):
         control.hand_brake = False
         control.reverse = False
         if self.path is None or len(self.path.poses) < 2:
-            control.throttle = 0.15
+            control.throttle = 0.0
             control.steer = 0.0
-            control.brake = 0.0
+            control.brake = 0.8
             return control, None
 
         # The path is in the vehicle/lidar frame: x forward, y lateral.
@@ -77,7 +77,6 @@ class FFEMPathFollower(Node):
         throttle = float(np.clip(0.25 * speed_error, 0.0, 0.55))
         brake = float(np.clip(-0.40 * speed_error, 0.0, 0.45))
 
-        # Slow down for strong curvature or a large path deviation.
         if abs(heading_error) > 0.35:
             throttle = min(throttle, 0.25)
         if distance < 2.0:

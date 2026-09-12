@@ -1,4 +1,4 @@
-"""Live ROS 2 adapter: PointCloud2 -> FFEM -> semantic/2.5D outputs/Rerun/RViz."""
+"""Live ROS 2 adapter: PointCloud2 -> FFEM -> semantic/2.5D outputs/Rerun/RViz/planning."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,8 @@ try:
     from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
     from sensor_msgs.msg import PointCloud2
     from std_msgs.msg import Float32MultiArray, String
+    from nav_msgs.msg import Path as PathMsg
+    from geometry_msgs.msg import PoseStamped
     from visualization_msgs.msg import Marker, MarkerArray
     from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
     ROS_AVAILABLE = True
@@ -20,6 +22,7 @@ except ImportError:
 
 from ffem.pipeline import FFEMPipeline, FFEMConfig
 from ffem.perception.factory import build_segmenter
+from ffem.planning.local_planner import LocalRiskPlanner
 from ffem.ros2.pointcloud2_codec import decode_pointcloud2, encode_pointcloud2
 from ffem.ros2.transforms import transform_points, transform_from_ros_transform
 
@@ -74,6 +77,7 @@ if ROS_AVAILABLE:
             self.declare_parameter("tracks_topic", "~/tracks")
             self.declare_parameter("refinement_markers_topic", "~/refinement_markers")
             self.declare_parameter("planning_risk_topic", "~/planning/risk")
+            self.declare_parameter("planning_path_topic", "~/planning/path")
 
             cfg = FFEMConfig(
                 base_cell_size=float(self.get_parameter("base_cell_size").value),
@@ -92,6 +96,7 @@ if ROS_AVAILABLE:
                 float(self.get_parameter("max_range").value),
             )
             self.pipeline = FFEMPipeline(cfg, segmenter=segmenter)
+            self.planner = LocalRiskPlanner()
             self.frame = 0
             self.map_frame = str(self.get_parameter("map_frame").value)
             self.max_points = int(self.get_parameter("max_points_per_frame").value)
@@ -125,6 +130,7 @@ if ROS_AVAILABLE:
             self.tracks_pub = self.create_publisher(MarkerArray, str(self.get_parameter("tracks_topic").value), 5)
             self.refinement_markers_pub = self.create_publisher(MarkerArray, str(self.get_parameter("refinement_markers_topic").value), reliable_qos)
             self.planning_risk_pub = self.create_publisher(Float32MultiArray, str(self.get_parameter("planning_risk_topic").value), 5)
+            self.planning_path_pub = self.create_publisher(PathMsg, str(self.get_parameter("planning_path_topic").value), reliable_qos)
 
             self.rerun_enabled = bool(self.get_parameter("enable_rerun").value) and rr is not None
             if self.rerun_enabled:
@@ -133,7 +139,8 @@ if ROS_AVAILABLE:
             ckpt_text = selected_checkpoint if selected_checkpoint else "none (fallback)"
             self.get_logger().info(
                 f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
-                f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | Rerun={self.rerun_enabled}"
+                f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | "
+                f"Rerun={self.rerun_enabled} | planner=local_risk"
             )
 
         def _lookup(self, msg):
@@ -256,6 +263,27 @@ if ROS_AVAILABLE:
                 array.markers.append(m)
             self.refinement_markers_pub.publish(array)
 
+        def _publish_planning_path(self, plan, stamp):
+            msg = PathMsg()
+            msg.header.frame_id = self.map_frame
+            msg.header.stamp = stamp
+            pts = plan["points"]
+            for i, (x, y) in enumerate(pts):
+                pose = PoseStamped()
+                pose.header = msg.header
+                pose.pose.position.x = float(x)
+                pose.pose.position.y = float(y)
+                pose.pose.position.z = 0.05
+                if i + 1 < len(pts):
+                    nx, ny = pts[i + 1]
+                else:
+                    nx, ny = pts[i]
+                yaw = float(np.arctan2(float(ny - y), float(nx - x)))
+                pose.pose.orientation.z = float(np.sin(yaw / 2.0))
+                pose.pose.orientation.w = float(np.cos(yaw / 2.0))
+                msg.poses.append(pose)
+            self.planning_path_pub.publish(msg)
+
         def _publish(self, result, stamp):
             map_points, _, _ = self.pipeline.mapping.arrays()
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
@@ -293,6 +321,9 @@ if ROS_AVAILABLE:
             self._publish_tracks(result.get("tracks", []))
             self._publish_refinement_markers()
 
+            plan = self.planner.plan(self.pipeline.mapping)
+            self._publish_planning_path(plan, stamp)
+
             stats = result["stats"]
             msg = Float32MultiArray()
             msg.data = [
@@ -310,6 +341,8 @@ if ROS_AVAILABLE:
                 float(np.mean(attention)) if len(attention) else 0.0,
                 float(stats["moving_points"]),
                 float(stats.get("tracks", 0)),
+                float(plan["cost"]),
+                float(plan["target_lateral_m"]),
             ]
             self.planning_risk_pub.publish(planning)
 
@@ -338,6 +371,8 @@ if ROS_AVAILABLE:
                 events = self.pipeline.mapping.events[-20:]
                 event_pts = np.array([[e["cell"][1], e["cell"][2], 0.05] for e in events], dtype=np.float32)
                 rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
+            plan = self.planner.plan(self.pipeline.mapping)
+            rr.log("world/planning/local_path", rr.LineStrips3D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))
             rr.log("metrics/memory/active_cells", rr.Scalars([stats["active_cells"]]))

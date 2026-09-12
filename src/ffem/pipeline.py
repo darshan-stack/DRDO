@@ -115,8 +115,8 @@ class AdaptiveElevationMap:
     def diagnostics(self):
         """Return per-cell arrays for RViz/dashboard diagnostic layers."""
         if not self.cells:
-            empty3=np.empty((0,3),dtype=np.float32); empty=np.empty((0,),dtype=np.float32)
-            return empty3, empty, empty, empty, empty, np.empty((0,),dtype=np.int32)
+            empty3=np.empty((0,3),dtype=np.float32); empty=np.empty((0,),dtype=np.float32); empty_i=np.empty((0,),dtype=np.int32)
+            return empty3, empty, empty, empty, empty_i
         cells=tuple(self.cells.values()); n=len(cells)
         pts=np.empty((n,3),dtype=np.float32); traversability=np.empty(n,dtype=np.float32)
         uncertainty=np.empty(n,dtype=np.float32); attention=np.empty(n,dtype=np.float32); levels=np.empty(n,dtype=np.int32)

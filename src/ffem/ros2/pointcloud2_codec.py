@@ -43,17 +43,19 @@ def decode_pointcloud2(msg, *, remove_invalid: bool = True, fields: tuple[str, .
     """Decode a sensor_msgs/PointCloud2-like message into NumPy arrays.
 
     The implementation avoids dtype reinterpretation assumptions and therefore
-    works with padding, non-contiguous rows, big-endian payloads, and arbitrary
-    field offsets. It returns points in the message's native frame.
+    works with padding, non-contiguous rows, big-endian payloads, organized clouds,
+    and arbitrary field offsets. It returns points in the message's native frame.
     """
     fmap = _field_map(msg)
     missing = [name for name in ('x','y','z') if name not in fmap]
-    if missing: raise ValueError(f'PointCloud2 is missing required fields: {missing}')
+    if missing:
+        raise ValueError(f'PointCloud2 is missing required fields: {missing}')
     width, height = int(msg.width), int(msg.height)
     point_step, row_step = int(msg.point_step), int(msg.row_step)
     raw = bytes(msg.data)
     expected = row_step * height
-    if len(raw) < expected: raise ValueError(f'PointCloud2 data truncated: {len(raw)} < {expected}')
+    if len(raw) < expected:
+        raise ValueError(f'PointCloud2 data truncated: {len(raw)} < {expected}')
     endian = '>' if bool(getattr(msg, 'is_bigendian', False)) else '<'
     values = {name: [] for name in fields if name in fmap}
     for row in range(height):
@@ -68,30 +70,89 @@ def decode_pointcloud2(msg, *, remove_invalid: bool = True, fields: tuple[str, .
     valid = np.isfinite(points).all(axis=1)
     if remove_invalid:
         points = points[valid]
+
     def optional(name, dtype=np.float32):
-        if name not in values: return None
+        if name not in values:
+            return None
         arr = np.asarray(values[name], dtype=dtype)
         return arr[valid] if remove_invalid else arr
+
     stamp = getattr(getattr(msg, 'header', None), 'stamp', None)
     stamp_ns = 0 if stamp is None else int(getattr(stamp, 'sec', 0))*1_000_000_000 + int(getattr(stamp, 'nanosec', 0))
-    return DecodedPointCloud(points, optional('intensity'), optional('ring', np.int32), optional('time'), width, height, getattr(getattr(msg, 'header', None), 'frame_id', ''), stamp_ns)
+    return DecodedPointCloud(
+        points, optional('intensity'), optional('ring', np.int32), optional('time'),
+        width, height, getattr(getattr(msg, 'header', None), 'frame_id', ''), stamp_ns,
+    )
 
 
-def encode_pointcloud2(points: np.ndarray, *, frame_id: str = 'base_link', stamp=None, intensity=None, ros_types=None):
-    """Create a sensor_msgs/PointCloud2 message when ROS message types exist."""
+def _pack_rgb_float32(rgb: np.ndarray) -> np.ndarray:
+    """Pack uint8 RGB triplets into the conventional PointCloud2 float32 rgb field."""
+    rgb = np.asarray(rgb, dtype=np.uint8).reshape(-1, 3)
+    packed = (
+        (rgb[:, 0].astype(np.uint32) << 16)
+        | (rgb[:, 1].astype(np.uint32) << 8)
+        | rgb[:, 2].astype(np.uint32)
+    )
+    return packed.view(np.float32)
+
+
+def encode_pointcloud2(
+    points: np.ndarray,
+    *,
+    frame_id: str = 'base_link',
+    stamp=None,
+    intensity=None,
+    rgb=None,
+    ros_types=None,
+):
+    """Create a sensor_msgs/PointCloud2 message when ROS message types exist.
+
+    Supports optional float32 intensity and conventional packed float32 ``rgb``
+    fields. ``rgb`` takes precedence as the visual color channel while intensity
+    is retained when requested by the caller.
+    """
     if ros_types is None:
         from sensor_msgs.msg import PointCloud2, PointField
     else:
         PointCloud2, PointField = ros_types
+
     points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
     intensity = None if intensity is None else np.asarray(intensity, dtype=np.float32).reshape(-1)
-    if intensity is not None and len(intensity) != len(points): raise ValueError('intensity length must match points')
-    fields = [PointField(name=n, offset=o, datatype=PointField.FLOAT32, count=1) for n,o in [('x',0),('y',4),('z',8)]]
-    if intensity is not None: fields.append(PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1))
-    step = 16 if intensity is not None else 12
-    payload = np.empty((len(points), step//4), dtype='<f4'); payload[:, :3] = points
-    if intensity is not None: payload[:, 3] = intensity
-    msg = PointCloud2(); msg.header.frame_id = frame_id
-    if stamp is not None: msg.header.stamp = stamp
-    msg.height=1; msg.width=len(points); msg.fields=fields; msg.is_bigendian=False; msg.point_step=step; msg.row_step=step*len(points); msg.is_dense=bool(np.isfinite(payload).all()); msg.data=payload.tobytes()
+    rgb = None if rgb is None else np.asarray(rgb, dtype=np.uint8).reshape(-1, 3)
+    if intensity is not None and len(intensity) != len(points):
+        raise ValueError('intensity length must match points')
+    if rgb is not None and len(rgb) != len(points):
+        raise ValueError('rgb length must match points')
+
+    fields = [PointField(name=n, offset=o, datatype=PointField.FLOAT32, count=1) for n, o in [('x',0),('y',4),('z',8)]]
+    offset = 12
+    if intensity is not None:
+        fields.append(PointField(name='intensity', offset=offset, datatype=PointField.FLOAT32, count=1))
+        offset += 4
+    if rgb is not None:
+        fields.append(PointField(name='rgb', offset=offset, datatype=PointField.FLOAT32, count=1))
+        offset += 4
+
+    step = offset
+    payload = np.zeros((len(points), step // 4), dtype='<f4')
+    payload[:, :3] = points
+    col = 3
+    if intensity is not None:
+        payload[:, col] = intensity
+        col += 1
+    if rgb is not None:
+        payload[:, col] = _pack_rgb_float32(rgb)
+
+    msg = PointCloud2()
+    msg.header.frame_id = frame_id
+    if stamp is not None:
+        msg.header.stamp = stamp
+    msg.height = 1
+    msg.width = len(points)
+    msg.fields = fields
+    msg.is_bigendian = False
+    msg.point_step = step
+    msg.row_step = step * len(points)
+    msg.is_dense = bool(np.isfinite(payload).all())
+    msg.data = payload.tobytes()
     return msg

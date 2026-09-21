@@ -35,8 +35,8 @@ client=carla.Client('127.0.0.1',2000); client.set_timeout(5.0)
 print('CARLA server:',client.get_server_version()); print('CARLA map:',client.get_world().get_map().name)
 PY
 
-NATIVE_PID=""; DRIVE_PID=""; OPEN3D_PID=""; DASHBOARD_PID=""; OWN_NATIVE=0
-cleanup(){ set +e; [[ -n "${DASHBOARD_PID:-}" ]] && kill "$DASHBOARD_PID" 2>/dev/null || true; [[ -n "${OPEN3D_PID:-}" ]] && kill "$OPEN3D_PID" 2>/dev/null || true; [[ -n "${DRIVE_PID:-}" ]] && kill "$DRIVE_PID" 2>/dev/null || true; if [[ "${OWN_NATIVE:-0}" == "1" && -n "${NATIVE_PID:-}" ]]; then kill "$NATIVE_PID" 2>/dev/null || true; fi; }
+NATIVE_PID=""; CONTROLLER_PID=""; TF_PID=""; OPEN3D_PID=""; DASHBOARD_PID=""; OWN_NATIVE=0
+cleanup(){ set +e; [[ -n "${DASHBOARD_PID:-}" ]] && kill "$DASHBOARD_PID" 2>/dev/null || true; [[ -n "${OPEN3D_PID:-}" ]] && kill "$OPEN3D_PID" 2>/dev/null || true; [[ -n "${CONTROLLER_PID:-}" ]] && kill "$CONTROLLER_PID" 2>/dev/null || true; [[ -n "${TF_PID:-}" ]] && kill "$TF_PID" 2>/dev/null || true; if [[ "${OWN_NATIVE:-0}" == "1" && -n "${NATIVE_PID:-}" ]]; then kill "$NATIVE_PID" 2>/dev/null || true; fi; }
 trap cleanup EXIT INT TERM
 
 # Reuse a manually started native stack when the topic already exists. Otherwise
@@ -62,26 +62,101 @@ fi
 rm -f /tmp/ffem_lidar_topic_check.$$ || true
 ros2 topic info --no-daemon "$TOPIC"
 
-# Start the driving/spectator helper and verify it actually stays alive.
-"$CARLA_PY" "$ROOT/sim/carla/drive_ego.py" --speed-difference=10 > "$ROOT/outputs/carla_drive.log" 2>&1 & DRIVE_PID=$!
-sleep 2
-if ! kill -0 "$DRIVE_PID" 2>/dev/null; then echo "ERROR: drive_ego.py failed:"; cat "$ROOT/outputs/carla_drive.log" || true; exit 1; fi
-echo "[PASS] Autonomous hero driver is running"
-tail -5 "$ROOT/outputs/carla_drive.log" || true
+CONTROLLER="${FFEM_CONTROLLER:-ffem}"
+USE_CARLA_TF="${FFEM_USE_CARLA_TF:-1}"
+ENABLE_OPEN3D="${FFEM_OPEN3D:-0}"
+ENABLE_DASHBOARD="${FFEM_DASHBOARD:-1}"
 
-# Live Open3D perception view.
-python3 "$ROOT/scripts/live_open3d_ros2.py" --topic "$TOPIC" > "$ROOT/outputs/open3d_live.log" 2>&1 & OPEN3D_PID=$!
+MAP_FRAME="lidar"
+USE_TF="false"
+if [[ "$USE_CARLA_TF" == "1" ]]; then
+  MAP_FRAME="map"
+  USE_TF="true"
+  echo "Starting CARLA LiDAR TF broadcaster..."
+  "$CARLA_PY" "$ROOT/sim/carla/carla_tf_broadcaster.py" \
+    --host 127.0.0.1 --port 2000 --map-frame map --sensor-frame lidar \
+    > "$ROOT/outputs/carla_tf.log" 2>&1 &
+  TF_PID=$!
+  sleep 1
+  if ! kill -0 "$TF_PID" 2>/dev/null; then
+    echo "ERROR: CARLA TF broadcaster failed:"
+    cat "$ROOT/outputs/carla_tf.log" || true
+    exit 1
+  fi
+  echo "[PASS] CARLA LiDAR TF broadcaster is running"
+fi
 
-# Polished browser dashboard: http://127.0.0.1:8765/
-python3 "$ROOT/scripts/live_dashboard.py" > "$ROOT/outputs/dashboard.log" 2>&1 & DASHBOARD_PID=$!
-sleep 2
-echo "Dashboard: http://127.0.0.1:8765/"
+case "$CONTROLLER" in
+  ffem)
+    "$CARLA_PY" "$ROOT/sim/carla/follow_ffem_path.py" \
+      --host 127.0.0.1 --port 2000 \
+      --target-speed "${FFEM_TARGET_SPEED:-5.0}" \
+      > "$ROOT/outputs/ffem_controller.log" 2>&1 &
+    CONTROLLER_PID=$!
+    ;;
+  behavior)
+    "$CARLA_PY" "$ROOT/sim/carla/drive_ego.py" \
+      --host 127.0.0.1 --port 2000 \
+      --target-speed "${FFEM_BEHAVIOR_SPEED:-18.0}" \
+      > "$ROOT/outputs/carla_drive.log" 2>&1 &
+    CONTROLLER_PID=$!
+    ;;
+  none)
+    echo "Controller disabled."
+    ;;
+  *)
+    echo "ERROR: unknown FFEM_CONTROLLER=$CONTROLLER"
+    echo "Expected: ffem, behavior, none"
+    exit 1
+    ;;
+esac
+
+if [[ -n "$CONTROLLER_PID" ]]; then
+  sleep 2
+  if ! kill -0 "$CONTROLLER_PID" 2>/dev/null; then
+    echo "ERROR: controller failed to start:"
+    cat "$ROOT/outputs/ffem_controller.log" 2>/dev/null || true
+    cat "$ROOT/outputs/carla_drive.log" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[PASS] Controller process is running: $CONTROLLER"
+fi
+
+if [[ "$ENABLE_OPEN3D" == "1" ]]; then
+  echo "Starting optional Open3D viewer..."
+  python3 "$ROOT/scripts/live_open3d_ros2.py" --topic "$TOPIC" \
+    > "$ROOT/outputs/open3d_live.log" 2>&1 &
+  OPEN3D_PID=$!
+fi
+
+if [[ "$ENABLE_DASHBOARD" == "1" ]]; then
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 1 \
+      http://127.0.0.1:8765/ >/dev/null 2>&1; then
+    echo "Dashboard already running: http://127.0.0.1:8765/"
+  else
+    python3 "$ROOT/scripts/live_dashboard.py" \
+      > "$ROOT/outputs/dashboard.log" 2>&1 &
+    DASHBOARD_PID=$!
+    sleep 2
+    if kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+      echo "Dashboard: http://127.0.0.1:8765/"
+    else
+      echo "WARNING: dashboard failed to start; continuing with core stack."
+    fi
+  fi
+fi
 
 ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
   input_topic:="$TOPIC" \
-  map_frame:=lidar \
-  use_tf:=false \
+  map_frame:="$MAP_FRAME" \
+  use_tf:="$USE_TF" \
   model_backend:=torch_range \
   checkpoint:="$CHECKPOINT" \
-  enable_rerun:=true \
+  range_height:="${FFEM_RANGE_HEIGHT:-16}" \
+  range_width:="${FFEM_RANGE_WIDTH:-512}" \
+  max_points_per_frame:="${FFEM_MAX_POINTS:-12000}" \
+  max_active_cells:="${FFEM_MAX_ACTIVE_CELLS:-12000}" \
+  max_topology_changes:="${FFEM_MAX_TOPOLOGY_CHANGES:-24}" \
+  queue_depth:="${FFEM_QUEUE_DEPTH:-2}" \
+  enable_rerun:="${FFEM_RERUN:-true}" \
   recording:="$ROOT/outputs/carla_ffem.rrd"

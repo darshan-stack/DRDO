@@ -273,7 +273,15 @@ if ROS_AVAILABLE:
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
             self.map_pub.publish(encode_pointcloud2(map_points, frame_id=self.map_frame, stamp=stamp, intensity=map_points[:, 2] if len(map_points) else None))
             labels = np.argmax(result["semantic_probs"], axis=1).astype(np.int32)
-            self.semantic_pub.publish(encode_pointcloud2(result["points"], frame_id=self.map_frame, stamp=stamp, rgb=self._semantic_rgb(labels)))
+            self.semantic_pub.publish(
+                encode_pointcloud2(
+                    result["points"],
+                    frame_id=self.map_frame,
+                    stamp=stamp,
+                    intensity=labels.astype(np.float32),
+                    rgb=self._semantic_rgb(labels),
+                )
+            )
             moving = result["points"][result["moving"]]
             moving_rgb = np.tile(np.array([[255, 45, 45]], dtype=np.uint8), (len(moving), 1))
             self.moving_pub.publish(encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp, rgb=moving_rgb))

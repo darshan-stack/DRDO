@@ -63,7 +63,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('input_topic', default_value='/carla/hero/lidar/point_cloud'),
         DeclareLaunchArgument('map_frame', default_value='lidar'),
-        DeclareLaunchArgument('model_backend', default_value='auto'),
+        DeclareLaunchArgument('model_backend', default_value='torch_range'),
         DeclareLaunchArgument('checkpoint', default_value=''),
         DeclareLaunchArgument('use_tf', default_value='false'),
         DeclareLaunchArgument('enable_rerun', default_value='true'),

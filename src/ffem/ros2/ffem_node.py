@@ -93,6 +93,7 @@ if ROS_AVAILABLE:
             self.use_tf = bool(self.get_parameter("use_tf").value)
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self)
+            self._previous_sensor_to_map = None
 
             qos = QoSProfile(depth=int(self.get_parameter("queue_depth").value), history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
             reliable_qos = QoSProfile(depth=5, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
@@ -145,8 +146,25 @@ if ROS_AVAILABLE:
                 matrix = self._lookup(msg)
                 if matrix is None:
                     return
+                ego_transform = None
+                if self.use_tf:
+                    if self._previous_sensor_to_map is not None:
+                        try:
+                            ego_transform = np.linalg.inv(matrix) @ self._previous_sensor_to_map
+                        except np.linalg.LinAlgError:
+                            self.get_logger().warning(
+                                "Skipping frame: non-invertible sensor transform",
+                                throttle_duration_sec=5.0,
+                            )
+                            return
+                    self._previous_sensor_to_map = matrix.copy()
                 points = transform_points(points, matrix)
-                result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
+                result = self.pipeline.process_points(
+                    points,
+                    intensity=intensity,
+                    frame=self.frame,
+                    ego_transform=ego_transform,
+                )
                 preliminary = self.planner.plan(self.pipeline.mapping)
                 feedback_changes = self.pipeline.mapping.apply_planning_feedback(preliminary["points"], preliminary["risk_profile"], self.frame)
                 final_plan = self.planner.plan(self.pipeline.mapping)
@@ -302,8 +320,19 @@ if ROS_AVAILABLE:
                 parent_cloud = np.column_stack([parent_points[:, 0], parent_points[:, 1], np.zeros(len(parent_points), dtype=np.float32)])
                 rr.log("world/map/hierarchy_parents", rr.Points3D(parent_cloud))
             if self.pipeline.mapping.events:
-                event_pts = np.array([[e["cell"][2], e["cell"][3], 0.05] for e in self.pipeline.mapping.events[-20:]], dtype=np.float32)
-                rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
+                event_points = []
+                for event in self.pipeline.mapping.events[-20:]:
+                    band, _, ix, iy = event["cell"]
+                    level = int(event["new_level"])
+                    size = float(self.pipeline.mapping._sizes[int(band)]) / (2 ** level)
+                    event_points.append(
+                        [(ix + 0.5) * size, (iy + 0.5) * size, 0.05]
+                    )
+                if event_points:
+                    rr.log(
+                        "world/adaptation/refinement_events",
+                        rr.Points3D(np.asarray(event_points, dtype=np.float32), radii=0.08),
+                    )
             rr.log("world/planning/local_path", rr.LineStrips2D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))

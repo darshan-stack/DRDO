@@ -58,6 +58,19 @@ dashboard/                browser dashboard
 ```
 
 ## Installation
+## Docker runtime
+
+A headless production runtime is provided in docker/Dockerfile and docker-compose.yml. CARLA remains an external runtime dependency; the FFEM container uses host networking so it can consume the native CARLA ROS2 LiDAR topic.
+
+```bash
+docker compose build
+docker compose up
+```
+
+The container expects models/checkpoints/semanticposs_range_model.pt and fails closed if it is missing. The default container profile is non-actuating, sensor-local, headless, and suitable for validating the ROS2 mapping stack before enabling TF or a controller.
+
+See docker/README.md for GPU pass-through, preflight, and health checks.
+
 
 Development/replay environment:
 

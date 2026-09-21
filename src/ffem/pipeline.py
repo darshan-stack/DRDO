@@ -242,6 +242,10 @@ class AdaptiveElevationMap:
     def _split(self, node: HierarchyNode) -> bool:
         if node.level >= self.cfg.max_level or node.children:
             return False
+        if node.size * 0.5 < self.cfg.finest_cell_size - 1e-12:
+            return False
+        if len(self.leaves) + 3 > self.cfg.max_active_cells:
+            return False
         child_stats = {
             "count": max(0, node.count // 4),
             "elevation": node.elevation,
@@ -655,7 +659,7 @@ class AdaptiveElevationMap:
     def hierarchy_arrays(self):
         """Return active parent centers and levels for visualization."""
         parents = [
-            node for node in self.nodes.values() if node.active and node.children
+            node for node in self.nodes.values() if node.children
         ]
         if not parents:
             return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.int8)
@@ -686,6 +690,16 @@ class FFEMPipeline:
         self.tracker = CentroidTracker()
         self.perception = segmenter or MockPerception(self.cfg.num_classes)
         self.history: list[dict[str, float | int]] = []
+
+    def reset(self) -> None:
+        """Reset all temporal state while preserving the configured segmenter."""
+        segmenter = self.perception
+        self.mapping = AdaptiveElevationMap(self.cfg)
+        self.map = self.mapping
+        self.motion = VoxelMotionDetector()
+        self.tracker = CentroidTracker()
+        self.perception = segmenter
+        self.history.clear()
 
     def _record_history(self, stats: dict[str, float | int]) -> None:
         self.history.append(dict(stats))

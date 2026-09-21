@@ -62,8 +62,8 @@ fi
 rm -f /tmp/ffem_lidar_topic_check.$$ || true
 ros2 topic info --no-daemon "$TOPIC"
 
-CONTROLLER="${FFEM_CONTROLLER:-ffem}"
-USE_CARLA_TF="${FFEM_USE_CARLA_TF:-1}"
+CONTROLLER="${FFEM_CONTROLLER:-none}"
+USE_CARLA_TF="${FFEM_USE_CARLA_TF:-0}"
 ENABLE_OPEN3D="${FFEM_OPEN3D:-0}"
 ENABLE_DASHBOARD="${FFEM_DASHBOARD:-1}"
 

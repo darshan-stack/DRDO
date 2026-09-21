@@ -179,11 +179,9 @@ def main() -> int:
                 )
 
     if failures:
-        print(f"
-FAILED checks: {len(failures)}")
+        print(f"\nFAILED checks: {len(failures)}")
         return 1
-    print("
-All requested preflight checks passed.")
+    print("\nAll requested preflight checks passed.")
     return 0
 
 

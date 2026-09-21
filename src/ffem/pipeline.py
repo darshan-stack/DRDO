@@ -18,7 +18,7 @@ from ffem.perception.motion import CentroidTracker, VoxelMotionDetector
 @dataclass
 class FFEMConfig:
     base_cell_size: float = 1.0
-    finest_cell_size: float = 0.25
+    finest_cell_size: float = 0.05
     max_level: int = 2
     refine_threshold: float = 0.60
     merge_threshold: float = 0.25

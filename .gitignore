@@ -25,3 +25,4 @@ outputs/*.log
 outputs/*.json
 outputs/*.npz
 *.egg-info/
+outputs/*.rrd

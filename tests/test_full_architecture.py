@@ -18,7 +18,7 @@ def test_explicit_four_child_hierarchy():
 
 
 def test_planning_feedback_increases_criticality_and_can_refine():
-    cfg = FFEMConfig(max_level=2, refine_threshold=0.50, planning_weight=0.20)
+    cfg = FFEMConfig(max_level=2, refine_threshold=0.25, planning_weight=0.20)
     mapping = AdaptiveElevationMap(cfg)
     root_id = mapping._ensure_root(3.0, 1.0)
     root = mapping.nodes[root_id]

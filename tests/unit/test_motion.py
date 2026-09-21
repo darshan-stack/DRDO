@@ -26,6 +26,6 @@ def test_uncompensated_motion_is_detected():
     detector = VoxelMotionDetector(voxel_size=0.5, threshold=0.2)
     previous = np.array([[2.0, 0.0, 0.0]], dtype=np.float32)
     detector.detect(previous)
-    current = np.array([[4.0, 0.0, 0.0]], dtype=np.float32)
+    current = np.array([[2.35, 0.0, 0.0]], dtype=np.float32)
     residual = detector.detect(current)
     assert residual.tolist() == [1.0]

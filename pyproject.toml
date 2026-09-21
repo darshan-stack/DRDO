@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ffem-lidar-mapping"
-version = "0.1.0"
+version = "0.3.0"
 description = "Research scaffold for adaptive variable-resolution 2.5D LiDAR mapping"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.26", "pyyaml>=6.0", "rerun-sdk>=0.22", "pillow>=10.0"]
@@ -21,3 +21,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["build", "install", "log"]

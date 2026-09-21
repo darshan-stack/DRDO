@@ -67,10 +67,9 @@ def main() -> None:
         p, it = prepare(i)
         pipeline.process_points(p, it, frame=i)
 
-    # Reset the map so warmup does not inflate the measured steady-state map.
-    pipeline.mapping.cells.clear()
-    pipeline.mapping.events.clear()
-    pipeline.history.clear()
+    # Reset the complete temporal/map state so warmup does not inflate the
+    # measured steady-state map, hierarchy, or motion detector.
+    pipeline.reset()
 
     timings: list[float] = []
     map_timings: list[float] = []

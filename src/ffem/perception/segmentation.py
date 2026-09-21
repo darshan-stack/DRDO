@@ -129,7 +129,7 @@ class NumpyFallbackSegmenter(SemanticSegmenter):
         labels[p[:, 2] > 0.8] = 4
         probs = np.full(
             (len(p), self.num_classes),
-            0.02 / max(self.num_classes - 1, 1),
+            0.12 / max(self.num_classes - 1, 1),
             dtype=np.float32,
         )
         if len(p):

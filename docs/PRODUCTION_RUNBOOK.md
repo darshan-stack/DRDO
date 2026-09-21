@@ -74,25 +74,32 @@ export FFEM_CHECKPOINT=/absolute/path/semanticposs_range_model.pt
 ./sim/carla/run_native_demo.sh
 ```
 
-The production demo defaults to:
+The production demo defaults to a non-actuating sensor-local run:
 
 - native CARLA ROS 2 LiDAR
-- TF-aware map-frame processing
 - trained semantic backend
 - bounded point and active-cell budgets
 - Rerun enabled
 - RViz2 enabled
-- FFEM path follower controller
+- controller disabled
 - browser dashboard when port 8765 is available
+
+Enable TF and the FFEM controller only after validating the CARLA-to-native-ROS coordinate convention in RViz:
 
 The optional Open3D viewer is disabled by default because it is not required for the core stack.
 
 Controller choices:
 
 ```bash
-FFEM_CONTROLLER=ffem      # FFEM risk-aware path follower
-FFEM_CONTROLLER=behavior  # CARLA BehaviorAgent demo
-FFEM_CONTROLLER=none      # perception/mapping/planning only
+FFEM_CONTROLLER=ffem      # FFEM planning -> CARLA control
+FFEM_CONTROLLER=behavior  # independent CARLA BehaviorAgent demo
+FFEM_CONTROLLER=none      # perception/mapping/planning only (default)
+```
+
+For a closed-loop CARLA demonstration:
+
+```bash
+FFEM_USE_CARLA_TF=1 FFEM_CONTROLLER=ffem ./sim/carla/run_native_demo.sh
 ```
 
 Useful limits:
@@ -106,7 +113,7 @@ FFEM_MAX_TOPOLOGY_CHANGES=24
 FFEM_QUEUE_DEPTH=2
 ```
 
-Set `FFEM_USE_CARLA_TF=0` only when operating in the sensor-local frame without the CARLA pose broadcaster.
+Set `FFEM_USE_CARLA_TF=0` for the default sensor-local mode. Before enabling TF for dynamic motion compensation, validate that the broadcaster's CARLA pose convention matches the native ROS2 LiDAR point convention in RViz and with a controlled translation/rotation test. This validation is required because CARLA and ROS coordinate conventions differ across integration paths.
 
 ## Preflight
 

@@ -17,3 +17,11 @@ outputs/reports/*
 !outputs/figures/.gitkeep
 !outputs/metrics/.gitkeep
 !outputs/reports/.gitkeep
+
+build/
+install/
+log/
+outputs/*.log
+outputs/*.json
+outputs/*.npz
+*.egg-info/

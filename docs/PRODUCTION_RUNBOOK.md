@@ -3,6 +3,34 @@
 This is the operational path for the ROS 2 + native CARLA demo. The trained semantic checkpoint is an external artifact and is not committed to Git.
 
 ## Required environment
+## Docker deployment
+
+The repository now includes a headless FFEM container. Build it from the repository root:
+
+```bash
+docker compose build
+```
+
+Start CARLA and its native ROS2 LiDAR publisher on the host, then run:
+
+```bash
+docker compose up
+```
+
+The container uses host networking and the same ROS2/Fast DDS environment as the native deployment. It does not launch RViz or a vehicle controller. This separation keeps container deployment focused on perception, mapping, planning, and observability.
+
+Run the container preflight before a live session:
+
+```bash
+docker compose run --rm ffem preflight \\
+  --checkpoint /models/checkpoints/semanticposs_range_model.pt \\
+  --require-checkpoint \\
+  --check-carla \\
+  --check-ffem
+```
+
+For NVIDIA GPU use, configure NVIDIA Container Toolkit on the host and verify GPU visibility before enabling GPU access for the FFEM service. The application selects CUDA automatically when PyTorch exposes a CUDA device.
+
 
 - Ubuntu 22.04
 - ROS 2 Humble

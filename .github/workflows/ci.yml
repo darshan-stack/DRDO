@@ -21,3 +21,6 @@ jobs:
         run: ruff check src scripts tests
       - name: Unit tests
         run: pytest -q
+      - name: ROS2 package metadata
+        working-directory: ros2
+        run: python setup.py --name

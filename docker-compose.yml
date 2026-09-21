@@ -16,7 +16,6 @@ services:
     volumes:
       - ${FFEM_CHECKPOINT_DIR:-./models/checkpoints}:/models/checkpoints:ro
       - ${FFEM_OUTPUT_DIR:-./outputs}:/opt/ffem/outputs
-      - ${FFEM_RECORDING_DIR:-./outputs}:/opt/ffem/outputs
     restart: unless-stopped
     stop_grace_period: 15s
     command:

@@ -70,6 +70,8 @@ def build_segmenter(
     height: int = 32,
     width: int = 1024,
     max_range: float = 80.0,
+    device: str = "auto",
+    min_free_vram_mb: int = 1024,
 ):
     selected = backend.strip().lower()
     found = discover_checkpoint(checkpoint)
@@ -98,6 +100,8 @@ def build_segmenter(
                     max_range=float(max_range),
                 ),
                 num_classes=int(num_classes),
+                device=device,
+                min_free_vram_mb=int(min_free_vram_mb),
             ),
             found,
         )

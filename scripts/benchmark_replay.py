@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark FFEM replay and emit JSON metrics for baseline comparison."""
 from __future__ import annotations
-import argparse, json, time
+import argparse, json
 from pathlib import Path
 import numpy as np
 from ffem.pipeline import FFEMPipeline, FFEMConfig

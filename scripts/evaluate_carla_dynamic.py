@@ -17,7 +17,6 @@ from pathlib import Path
 import numpy as np
 
 from ffem.evaluation.metrics import binary_precision_recall
-from ffem.io.semantic_poss import CLASS_NAMES
 from ffem.perception.factory import build_segmenter
 from ffem.pipeline import FFEMConfig, FFEMPipeline
 
@@ -314,6 +313,16 @@ def main():
         "frame_level": {
             "joint_detection_rate": continuity,
             "fragmentation_transitions": fragment_count,
+            "point_level_from_helper": binary_precision_recall(
+                np.asarray(
+                    [row["predicted_moving_points"] > 0 for row in frame_rows],
+                    dtype=bool,
+                ),
+                np.asarray(
+                    [row["ground_truth_moving_points"] > 0 for row in frame_rows],
+                    dtype=bool,
+                ),
+            ),
             "frames_with_gt_motion": int(sum(gt_present)),
             "frames_with_predicted_motion": int(
                 sum(row["predicted_moving_points"] > 0 for row in frame_rows)

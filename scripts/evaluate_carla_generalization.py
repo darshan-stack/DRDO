@@ -52,8 +52,7 @@ def metrics(cm):
 
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('--checkpoint',default='models/checkpoints/semanticposs_range_model.pt'); ap.add_argument('--host',default='127.0.0.1'); ap.add_argument('--port',type=int,default=2000); ap.add_argument('--frames',type=int,default=50); ap.add_argument('--voxel',type=float,default=0.12); ap.add_argument('    ap.add_argument('--device',choices=['auto','cpu','cuda'],default='auto')
-',default='outputs/carla_generalization.json'); ap.add_argument('--max-points',type=int,default=5000); args=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('--checkpoint',default='models/checkpoints/semanticposs_range_model.pt'); ap.add_argument('--host',default='127.0.0.1'); ap.add_argument('--port',type=int,default=2000); ap.add_argument('--frames',type=int,default=50); ap.add_argument('--voxel',type=float,default=0.12); ap.add_argument('--device',choices=['auto','cpu','cuda'],default='auto'); ap.add_argument('--output',default='outputs/carla_generalization.json'); ap.add_argument('--max-points',type=int,default=5000); args=ap.parse_args()
     import carla
     client=carla.Client(args.host,args.port); client.set_timeout(10.0); world=client.get_world(); vehicles=list(world.get_actors().filter('vehicle.*'))
     if not vehicles: raise SystemExit('No vehicle found in CARLA. Start native stack first.')

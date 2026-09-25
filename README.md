@@ -2,6 +2,49 @@
 
 Feedback-Foveated Elevation Mapping (FFEM) for adaptive variable-resolution 2.5D LiDAR mapping in dynamic environments.
 
+
+## Final native demo and validation
+
+The final submission path is native Ubuntu + ROS 2 Humble + CARLA 0.9.16. Docker is optional and is not required for the demonstration.
+
+Start CARLA with native ROS 2 support:
+
+```bash
+cd ~/CARLA
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+./CarlaUE4.sh --ros2
+```
+
+Then start the CARLA native ROS 2 sensor bridge:
+
+```bash
+cd ~/CARLA/PythonAPI/examples/ros2
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+~/CARLA/carla_env/bin/python3 ros2_native.py --host 127.0.0.1 --port 2000 --file stack.json --verbose
+```
+
+For a 6 GB RTX 3050 laptop, use `FFEM_DEVICE=auto`; the runtime falls back to CPU when free VRAM is below `FFEM_MIN_FREE_VRAM_MB`.
+
+```bash
+export FFEM_DEVICE=auto
+export FFEM_MIN_FREE_VRAM_MB=1024
+export FFEM_RVIZ=1
+export FFEM_OPEN3D=1
+```
+
+After capturing identical LiDAR frames, run the reproducible three-way comparison:
+
+```bash
+python3 scripts/benchmark_ps26053.py \
+  --frames-file outputs/memory_experiment_frames.npz \
+  --checkpoint models/checkpoints/semanticposs_range_model.pt \
+  --device cpu
+```
+
+The comparison reports mean/P50/P95 core latency, FPS, peak process RSS, active cells, and FFEM reductions relative to the uniform 5 cm baseline. Results are saved to `outputs/ps26053_comparison.json`.
+
 ## Production candidate
 
 The `production-ready-ffem` branch is a hardened release candidate for the ROS 2 + native CARLA workflow. It includes a real PointCloud2 ingestion path, seven-class range-image semantic inference, scan-to-scan motion residuals, lightweight tracking, hierarchical four-way adaptive mapping, uncertainty/traversability/attention channels, closed-loop planning feedback, RViz2/Rerun/dashboard outputs, preflight checks, CI configuration, and an optional CARLA controller.

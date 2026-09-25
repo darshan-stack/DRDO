@@ -36,6 +36,7 @@ adaptation:
   max_topology_changes_per_frame: 32
   max_active_cells: 20000
   predictive_dilation_frames: 2
+  predictive_dilation_radius_m: 1.0
 
 perception:
   backend: torch_range

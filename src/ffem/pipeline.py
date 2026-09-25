@@ -750,6 +750,7 @@ class FFEMPipeline:
         self.motion = VoxelMotionDetector()
         self.tracker = CentroidTracker()
         self.perception = segmenter
+        self._planning_forecast = {}
         self.history.clear()
 
     def _record_history(self, stats: dict[str, float | int]) -> None:

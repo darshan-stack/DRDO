@@ -51,6 +51,8 @@ if ROS_AVAILABLE:
             self.declare_parameter("range_height", 32)
             self.declare_parameter("range_width", 1024)
             self.declare_parameter("max_range", 80.0)
+            self.declare_parameter("device", "auto")
+            self.declare_parameter("min_free_vram_mb", 1024)
             self.declare_parameter("base_cell_size", 1.0)
             self.declare_parameter("finest_cell_size", 0.25)
             self.declare_parameter("max_level", 2)
@@ -84,6 +86,8 @@ if ROS_AVAILABLE:
                 int(self.get_parameter("range_height").value),
                 int(self.get_parameter("range_width").value),
                 float(self.get_parameter("max_range").value),
+                str(self.get_parameter("device").value),
+                int(self.get_parameter("min_free_vram_mb").value),
             )
             self.pipeline = FFEMPipeline(cfg, segmenter=segmenter)
             self.planner = LocalRiskPlanner()
@@ -119,7 +123,9 @@ if ROS_AVAILABLE:
             self.get_logger().info(
                 f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
                 f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | "
-                f"Rerun={self.rerun_enabled} | planner=local_risk | feedback=closed_loop | hierarchy=4ary"
+                f"Rerun={self.rerun_enabled} | device={getattr(segmenter, 'device', 'n/a')} | "
+                f"device_note={getattr(segmenter, 'device_note', 'n/a')} | "
+                f"planner=local_risk | feedback=closed_loop | hierarchy=4ary"
             )
 
         def _lookup(self, msg):

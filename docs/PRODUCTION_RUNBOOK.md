@@ -3,6 +3,9 @@
 This is the operational path for the ROS 2 + native CARLA demo. The trained semantic checkpoint is an external artifact and is not committed to Git.
 
 ## Required environment
+
+The primary submission/demo path is the native Ubuntu + ROS 2 + CARLA stack. Docker is optional for reproducibility and is not required for the final demonstration.
+
 ## Docker deployment
 
 The repository now includes a headless FFEM container. Build it from the repository root:
@@ -94,7 +97,25 @@ Expected values are `0`, `rmw_fastrtps_cpp`, and `UDPv4`.
 
 ## One-command demo
 
-Start CARLA 0.9.16 normally, then:
+Start CARLA 0.9.16 with native ROS 2 enabled:
+
+```bash
+cd ~/CARLA
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+./CarlaUE4.sh --ros2
+```
+
+Then start the native ROS 2 sensor bridge in another terminal:
+
+```bash
+cd ~/CARLA/PythonAPI/examples/ros2
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+~/CARLA/carla_env/bin/python3 ros2_native.py --host 127.0.0.1 --port 2000 --file stack.json --verbose
+```
+
+With those terminals running, launch the FFEM demo:
 
 ```bash
 cd ~/DRDO
@@ -108,8 +129,9 @@ The production demo defaults to a non-actuating sensor-local run:
 - trained semantic backend
 - bounded point and active-cell budgets
 - Rerun enabled
-- RViz2 enabled
+- RViz2 enabled by default (`FFEM_RVIZ=0` disables it)
 - controller disabled
+- automatic CPU fallback when free VRAM is below the configured threshold
 - browser dashboard when port 8765 is available
 
 Enable TF and the FFEM controller only after validating the CARLA-to-native-ROS coordinate convention in RViz:
@@ -128,6 +150,15 @@ For a closed-loop CARLA demonstration:
 
 ```bash
 FFEM_USE_CARLA_TF=1 FFEM_CONTROLLER=ffem ./sim/carla/run_native_demo.sh
+```
+
+Runtime controls:
+
+```bash
+FFEM_DEVICE=auto              # auto/cpu/cuda
+FFEM_MIN_FREE_VRAM_MB=1024    # auto mode falls back to CPU below this free VRAM
+FFEM_RVIZ=1                   # start RViz2 (default)
+FFEM_OPEN3D=1                 # start bounded/throttled Open3D viewer
 ```
 
 Useful limits:
@@ -233,12 +264,13 @@ Never report unmeasured accuracy or memory numbers. The repository provides:
 python3 scripts/evaluate_segmentation.py ...
 python3 scripts/evaluate_carla_generalization.py ...
 python3 scripts/benchmark_replay.py ...
+python3 scripts/benchmark_ps26053.py --frames-file outputs/memory_experiment_frames.npz ...
 python3 scripts/benchmark_performance.py ...
 python3 scripts/evaluate_memory_savings.py ...
 python3 scripts/final_validation.py ...
 ```
 
-The memory experiment reports map-storage reduction only; it is not a whole-process RSS measurement. The CARLA controller is a demonstration controller, not a safety-certified controller.
+The original memory experiment reports map-storage reduction only; it is not a whole-process RSS measurement. For actual process memory, use `scripts/benchmark_ps26053.py`, which runs each method in a fresh child process and reports peak RSS. The CARLA controller is a demonstration controller, not a safety-certified controller.
 
 ## Release checklist
 

@@ -1,0 +1,38 @@
+services:
+  ffem:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ffem-lidar-mapping:0.3.0
+    container_name: ffem_mapper
+    network_mode: host
+    ipc: host
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      FASTDDS_BUILTIN_TRANSPORTS: ${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}
+      FFEM_CHECKPOINT: ${FFEM_CHECKPOINT:-/models/checkpoints/semanticposs_range_model.pt}
+      FFEM_TORCH_THREADS: ${FFEM_TORCH_THREADS:-4}
+    volumes:
+      - ${FFEM_CHECKPOINT_DIR:-./models/checkpoints}:/models/checkpoints:ro
+      - ${FFEM_OUTPUT_DIR:-./outputs}:/opt/ffem/outputs
+    restart: unless-stopped
+    stop_grace_period: 15s
+    command:
+      - ros2
+      - launch
+      - ffem_lidar_mapping
+      - ffem_integrated.launch.py
+      - input_topic:=/carla/hero/lidar/point_cloud
+      - map_frame:=lidar
+      - use_tf:=false
+      - model_backend:=torch_range
+      - checkpoint=/models/checkpoints/semanticposs_range_model.pt
+      - enable_rerun:=true
+      - enable_rviz:=false
+      - range_height:=16
+      - range_width:=512
+      - max_points_per_frame:=12000
+      - max_active_cells:=12000
+      - max_topology_changes:=24
+      - queue_depth:=2

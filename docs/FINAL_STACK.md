@@ -17,7 +17,8 @@ ROS 2 PointCloud2
 FFEM ROS 2 node
         |
         +--> point validation / point-budget control
-        +--> optional TF transform
+        +--> optional timestamped map<-sensor TF transform
+        |       +--> ego-motion compensated motion residuals
         +--> spherical range projection
         +--> PyTorch LiDAR semantic inference
         +--> scan-to-scan motion residual
@@ -125,6 +126,8 @@ source ~/DRDO/sim/carla/native_env.sh
 ```
 
 ## Full-stack command
+
+For the production native CARLA path, prefer sim/carla/run_native_demo.sh because it coordinates the native ROS2 bridge, TF, controller, dashboard, and mapper. The direct ROS2 command remains useful for diagnosis.
 
 ```bash
 cd ~/DRDO

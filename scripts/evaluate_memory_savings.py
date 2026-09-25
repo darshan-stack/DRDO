@@ -100,6 +100,7 @@ def main() -> None:
     ap.add_argument("--cell-bytes", type=int, default=64)
     ap.add_argument("--output", default="outputs/memory_savings.json")
     ap.add_argument("--save-frames", default="outputs/memory_experiment_frames.npz")
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     args = ap.parse_args()
 
     if args.frames < 2:
@@ -125,7 +126,7 @@ def main() -> None:
     )
 
     print("Replaying the exact captured frames through FFEM...")
-    segmenter, selected = build_segmenter("torch_range", args.checkpoint, 7)
+    segmenter, selected = build_segmenter("torch_range", args.checkpoint, 7, device=args.device)
     cfg = FFEMConfig(
         finest_cell_size=args.uniform_cell,
         max_active_cells=200_000,

@@ -59,6 +59,12 @@ def main():
     ap.add_argument("--carla-eval", default="outputs/carla_generalization.json")
     ap.add_argument("--performance", default="outputs/performance_benchmark.json")
     ap.add_argument("--memory", default="outputs/memory_savings.json")
+    ap.add_argument("--comparison", default="outputs/ps26053_comparison.json")
+    ap.add_argument("--ablation", default="outputs/ps26053_ablation_matrix.json")
+    ap.add_argument("--dynamic", default="outputs/dynamic_scene_metrics.json")
+    ap.add_argument("--terrain", default="outputs/elevation_traversability_metrics.json")
+    ap.add_argument("--projection", default="outputs/projection_invariants.json")
+    ap.add_argument("--stability", default="outputs/long_duration_stability.json")
     ap.add_argument("--output", default="outputs/final_validation_report.json")
     args = ap.parse_args()
 
@@ -69,6 +75,8 @@ def main():
             "Semantic accuracy is reported only from an actual SemanticPOSS evaluation JSON.",
             "CARLA generalization is reported only from the normal-LiDAR-vs-semantic-LiDAR experiment.",
             "Memory is a map-storage proxy, not whole-process RSS.",
+            "Dynamic metrics require a scene containing moving CARLA actors.",
+            "Elevation/traversability metrics use synchronized CARLA semantic LiDAR ground truth.",
             "The CARLA controller is a demonstration path follower, not a safety-rated controller.",
         ],
     }
@@ -78,6 +86,12 @@ def main():
         ("carla_generalization", args.carla_eval),
         ("performance", args.performance),
         ("memory", args.memory),
+        ("comparison", args.comparison),
+        ("ablation", args.ablation),
+        ("dynamic", args.dynamic),
+        ("terrain", args.terrain),
+        ("projection", args.projection),
+        ("stability", args.stability),
     ):
         data = load_json(Path(path_str))
         report["evidence"][name] = data if data is not None else {"status": "not_run", "path": path_str}

@@ -31,7 +31,7 @@ class SemanticPOSSDataset:
     def available_sequences(self): return sorted(set(s for _,_,s in self.samples))
     def __len__(self): return len(self.samples)
     def __getitem__(self,index):
-        scan,label,seq=self.samples[index]; points=np.fromfile(scan,dtype=np.float32)
+        scan,label,_seq=self.samples[index]; points=np.fromfile(scan,dtype=np.float32)
         if points.size%4: raise ValueError(f'Invalid point record length in {scan}')
         points=points.reshape(-1,4); y=None
         if label is not None:

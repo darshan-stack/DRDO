@@ -1,9 +1,12 @@
 """LiDAR semantic segmentation interfaces and range-image backend."""
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 import os
+
 import numpy as np
+
 
 @dataclass
 class ProjectionConfig:
@@ -14,68 +17,266 @@ class ProjectionConfig:
     fov_up_deg: float = 10.0
     fov_down_deg: float = -30.0
 
+
 class RangeImageProjector:
-    def __init__(self, config: ProjectionConfig | None=None):
-        self.cfg=config or ProjectionConfig()
-    def project(self, points: np.ndarray, intensity: np.ndarray | None=None) -> dict[str,np.ndarray]:
-        p=np.asarray(points,dtype=np.float32).reshape(-1,3); n=len(p)
-        inten=np.zeros(n,dtype=np.float32) if intensity is None else np.asarray(intensity,dtype=np.float32)
-        depth=np.linalg.norm(p,axis=1); yaw=np.arctan2(p[:,1],p[:,0]); pitch=np.arcsin(np.clip(p[:,2]/np.maximum(depth,1e-6),-1,1))
-        col=((yaw+np.pi)/(2*np.pi)*self.cfg.width).astype(np.int32)%self.cfg.width
-        vfov=np.deg2rad(self.cfg.fov_up_deg-self.cfg.fov_down_deg)
-        valid=(depth>=self.cfg.min_range)&(depth<=self.cfg.max_range)&np.isfinite(p).all(axis=1)
-        idx=np.flatnonzero(valid)
-        ri=np.full((self.cfg.height,self.cfg.width),-1,dtype=np.int64)
-        dimg=np.zeros((self.cfg.height,self.cfg.width),dtype=np.float32)
-        iimg=np.zeros_like(dimg)
+    def __init__(self, config: ProjectionConfig | None = None):
+        self.cfg = config or ProjectionConfig()
+        if self.cfg.height <= 0 or self.cfg.width <= 0:
+            raise ValueError("Range-image height and width must be positive")
+        if self.cfg.max_range <= self.cfg.min_range:
+            raise ValueError("max_range must exceed min_range")
+
+    def project(
+        self,
+        points: np.ndarray,
+        intensity: np.ndarray | None = None,
+    ) -> dict[str, np.ndarray]:
+        p = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+        n = len(p)
+        if intensity is None:
+            inten = np.zeros(n, dtype=np.float32)
+        else:
+            inten = np.asarray(intensity, dtype=np.float32).reshape(-1)
+            if len(inten) != n:
+                raise ValueError("intensity length must match points")
+
+        depth = np.linalg.norm(p, axis=1)
+        yaw = np.arctan2(p[:, 1], p[:, 0])
+        pitch = np.arcsin(
+            np.clip(p[:, 2] / np.maximum(depth, 1e-6), -1.0, 1.0)
+        )
+        col = (
+            (yaw + np.pi) / (2.0 * np.pi) * self.cfg.width
+        ).astype(np.int32) % self.cfg.width
+        vfov = np.deg2rad(self.cfg.fov_up_deg - self.cfg.fov_down_deg)
+
+        valid = (
+            (depth >= self.cfg.min_range)
+            & (depth <= self.cfg.max_range)
+            & np.isfinite(p).all(axis=1)
+        )
+
+        point_index = np.full(
+            (self.cfg.height, self.cfg.width),
+            -1,
+            dtype=np.int64,
+        )
+        depth_image = np.zeros(
+            (self.cfg.height, self.cfg.width),
+            dtype=np.float32,
+        )
+        intensity_image = np.zeros_like(depth_image)
+
+        idx = np.flatnonzero(valid)
         if len(idx):
-            row=np.clip(((np.deg2rad(self.cfg.fov_up_deg)-pitch[idx])/vfov*self.cfg.height).astype(np.int32),0,self.cfg.height-1)
-            colv=col[idx]; flat=row*self.cfg.width+colv
-            order=np.lexsort((depth[idx],flat)); sorted_flat=flat[order]
-            first=np.empty(len(order),dtype=bool); first[0]=True; first[1:]=sorted_flat[1:]!=sorted_flat[:-1]
-            chosen=idx[order[first]]; chosen_flat=sorted_flat[first]
-            rr=chosen_flat//self.cfg.width; cc=chosen_flat%self.cfg.width
-            ri[rr,cc]=chosen; dimg[rr,cc]=depth[chosen]; iimg[rr,cc]=inten[chosen]
-        return {'depth':dimg,'intensity':iimg,'point_index':ri,'valid':valid}
+            rows = np.clip(
+                (
+                    (np.deg2rad(self.cfg.fov_up_deg) - pitch[idx])
+                    / vfov
+                    * self.cfg.height
+                ).astype(np.int32),
+                0,
+                self.cfg.height - 1,
+            )
+            cols = col[idx]
+            flat = rows * self.cfg.width + cols
+            order = np.lexsort((depth[idx], flat))
+            sorted_flat = flat[order]
+            first = np.empty(len(order), dtype=bool)
+            first[0] = True
+            first[1:] = sorted_flat[1:] != sorted_flat[:-1]
+            chosen = idx[order[first]]
+            chosen_flat = sorted_flat[first]
+            rr = chosen_flat // self.cfg.width
+            cc = chosen_flat % self.cfg.width
+            point_index[rr, cc] = chosen
+            depth_image[rr, cc] = depth[chosen]
+            intensity_image[rr, cc] = inten[chosen]
+
+        return {
+            "depth": depth_image,
+            "intensity": intensity_image,
+            "point_index": point_index,
+            "valid": valid,
+        }
+
 
 class SemanticSegmenter:
-    num_classes:int
-    def predict(self,points:np.ndarray,intensity:np.ndarray|None=None): raise NotImplementedError
+    num_classes: int
+
+    def predict(self, points: np.ndarray, intensity: np.ndarray | None = None):
+        raise NotImplementedError
+
 
 class NumpyFallbackSegmenter(SemanticSegmenter):
-    """Non-neural fallback for smoke tests only; never use for final results."""
-    def __init__(self,num_classes=7): self.num_classes=num_classes
-    def predict(self,points,intensity=None):
-        p=np.asarray(points); inten=np.zeros(len(p)) if intensity is None else np.asarray(intensity)
-        labels=np.zeros(len(p),dtype=np.int64); labels[p[:,2]>.25]=2; labels[inten>.72]=1; labels[p[:,2]>.8]=4
-        probs=np.full((len(p),self.num_classes),.02/max(self.num_classes-1,1),dtype=np.float32); probs[np.arange(len(p)),labels]=.88
-        return labels,probs
+    """Non-neural fallback for smoke tests only."""
+
+    def __init__(self, num_classes: int = 7):
+        self.num_classes = int(num_classes)
+
+    def predict(self, points, intensity=None):
+        p = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+        if intensity is None:
+            inten = np.zeros(len(p), dtype=np.float32)
+        else:
+            inten = np.asarray(intensity, dtype=np.float32).reshape(-1)
+            if len(inten) != len(p):
+                raise ValueError("intensity length must match points")
+
+        labels = np.zeros(len(p), dtype=np.int64)
+        labels[p[:, 2] > 0.25] = 2
+        labels[inten > 0.72] = 1
+        labels[p[:, 2] > 0.8] = 4
+        probs = np.full(
+            (len(p), self.num_classes),
+            0.12 / max(self.num_classes - 1, 1),
+            dtype=np.float32,
+        )
+        if len(p):
+            probs[np.arange(len(p)), labels] = 0.88
+        return labels, probs
+
 
 class TorchRangeSegmenter(SemanticSegmenter):
-    """Point-wise range-image model adapter. Requires torch and a trained checkpoint."""
-    def __init__(self,checkpoint:str,projection:ProjectionConfig|None=None,num_classes:int=7,device:str='auto'):
+    """Point-wise adapter around the trained compact range-image model."""
+
+    def __init__(
+        self,
+        checkpoint: str,
+        projection: ProjectionConfig | None = None,
+        num_classes: int = 7,
+        device: str = "auto",
+        min_free_vram_mb: int = 1024,
+    ):
         try:
-            import torch; import torch.nn as nn
+            import torch
+            import torch.nn as nn
         except ImportError as exc:
-            raise RuntimeError('Install torch to use TorchRangeSegmenter.') from exc
-        self.torch=torch; self.projector=RangeImageProjector(projection); self.num_classes=num_classes
-        self.device='cuda' if device=='auto' and torch.cuda.is_available() else device if device!='auto' else 'cpu'
-        if self.device=='cpu':
-            try: torch.set_num_threads(int(os.environ.get('FFEM_TORCH_THREADS','4')))
-            except Exception: pass
-        self.model=nn.Sequential(nn.Conv2d(2,32,3,padding=1),nn.ReLU(),nn.Conv2d(32,64,3,padding=1),nn.ReLU(),nn.Conv2d(64,num_classes,1)).to(self.device)
-        try: state=torch.load(Path(checkpoint),map_location='cpu',weights_only=True)
-        except TypeError: state=torch.load(Path(checkpoint),map_location='cpu')
-        if isinstance(state,dict) and 'classes' in state and int(state['classes'])!=num_classes: raise ValueError(f'Checkpoint has {state["classes"]} classes but FFEM expects {num_classes}')
-        if isinstance(state,dict) and 'class_names' in state and len(state['class_names'])!=num_classes: raise ValueError('Checkpoint class_names length does not match model output')
-        weights=state.get('model',state) if isinstance(state,dict) else state
-        self.model.load_state_dict(weights); self.model.eval()
-    def predict(self,points:np.ndarray,intensity:np.ndarray|None=None):
-        t=self.torch; img=self.projector.project(points,intensity)
-        x=np.stack((img['depth']/self.projector.cfg.max_range,img['intensity']),axis=0)[None]
-        xt=t.from_numpy(x).float().to(self.device)
-        with t.inference_mode(): logits=self.model(xt)[0].cpu().numpy()
-        pix=np.argmax(logits,axis=0); probs=np.exp(logits-logits.max(0,keepdims=True)); probs/=probs.sum(0,keepdims=True)+1e-8
-        ri=img['point_index']; labels=np.zeros(len(points),dtype=np.int64); out=np.zeros((len(points),self.num_classes),dtype=np.float32); rows,cols=np.where(ri>=0); orig=ri[rows,cols]
-        labels[orig]=pix[rows,cols]; out[orig]=probs[:,rows,cols].T
-        return labels,out
+            raise RuntimeError("Install torch to use TorchRangeSegmenter.") from exc
+
+        self.torch = torch
+        self.projector = RangeImageProjector(projection)
+        self.num_classes = int(num_classes)
+        requested_device = str(device).strip().lower()
+        if requested_device not in {"auto", "cpu", "cuda"}:
+            raise ValueError("device must be one of: auto, cpu, cuda")
+        self.requested_device = requested_device
+        self.min_free_vram_mb = int(min_free_vram_mb)
+        self.device = "cuda" if requested_device == "auto" and torch.cuda.is_available() else requested_device
+        if self.device == "auto":
+            self.device = "cpu"
+        self.device_note = "configured"
+        if self.device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA was requested but PyTorch reports no CUDA device. "
+                "Use device:=auto or device:=cpu."
+            )
+        if requested_device == "auto" and self.device == "cuda":
+            try:
+                free_bytes, _ = torch.cuda.mem_get_info()
+                free_mb = free_bytes / (1024 ** 2)
+                if free_mb < self.min_free_vram_mb:
+                    self.device = "cpu"
+                    self.device_note = (
+                        f"auto-selected CPU because only {free_mb:.0f} MiB VRAM was free "
+                        f"(< {self.min_free_vram_mb} MiB threshold)"
+                    )
+            except Exception as exc:
+                self.device_note = f"VRAM check unavailable: {exc}"
+        elif self.device == "cuda":
+            try:
+                free_bytes, _ = torch.cuda.mem_get_info()
+                free_mb = free_bytes / (1024 ** 2)
+                if free_mb < self.min_free_vram_mb:
+                    raise RuntimeError(
+                        f"CUDA requested but only {free_mb:.0f} MiB VRAM is free; "
+                        f"need at least {self.min_free_vram_mb} MiB. "
+                        "Close GPU-heavy applications or use device:=cpu/auto."
+                    )
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                self.device_note = f"VRAM check unavailable: {exc}"
+
+        if self.device == "cpu":
+            try:
+                torch.set_num_threads(
+                    int(os.environ.get("FFEM_TORCH_THREADS", "4")
+                ))
+            except Exception:
+                pass
+
+        self.model = nn.Sequential(
+            nn.Conv2d(2, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, self.num_classes, 1),
+        ).to(self.device)
+
+        path = Path(checkpoint).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:
+            state = torch.load(path, map_location="cpu")
+
+        if isinstance(state, dict) and "classes" in state:
+            if int(state["classes"]) != self.num_classes:
+                raise ValueError(
+                    f"Checkpoint has {state['classes']} classes but FFEM expects {self.num_classes}"
+                )
+        if isinstance(state, dict) and "class_names" in state:
+            if len(state["class_names"]) != self.num_classes:
+                raise ValueError("Checkpoint class_names length does not match model output")
+
+        weights = state.get("model", state) if isinstance(state, dict) else state
+        if not isinstance(weights, dict):
+            raise ValueError("Unsupported checkpoint format: expected a state_dict")
+        self.model.load_state_dict(weights, strict=True)
+        self.model.eval()
+
+    def predict(self, points: np.ndarray, intensity: np.ndarray | None = None):
+        t = self.torch
+        p = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+        if intensity is None:
+            intensity = np.zeros(len(p), dtype=np.float32)
+        else:
+            intensity = np.asarray(intensity, dtype=np.float32).reshape(-1)
+            if len(intensity) != len(p):
+                raise ValueError("intensity length must match points")
+
+        labels = np.zeros(len(p), dtype=np.int64)
+        probs = np.zeros((len(p), self.num_classes), dtype=np.float32)
+        if not len(p):
+            return labels, probs
+
+        image = self.projector.project(p, intensity)
+        x = np.stack(
+            (
+                image["depth"] / self.projector.cfg.max_range,
+                image["intensity"],
+            ),
+            axis=0,
+        )[None]
+        xt = t.from_numpy(x).float().to(self.device)
+
+        with t.inference_mode():
+            logits = self.model(xt)[0].cpu().numpy()
+
+        pixel_labels = np.argmax(logits, axis=0)
+        shifted = logits - logits.max(axis=0, keepdims=True)
+        pixel_probs = np.exp(shifted)
+        pixel_probs /= pixel_probs.sum(axis=0, keepdims=True) + 1e-8
+
+        # Every point starts as unknown. Only points represented in the range
+        # image are replaced by neural predictions.
+        probs[:, 0] = 1.0
+        point_index = image["point_index"]
+        rows, cols = np.where(point_index >= 0)
+        original = point_index[rows, cols]
+        labels[original] = pixel_labels[rows, cols]
+        probs[original] = pixel_probs[:, rows, cols].T
+        return labels, probs

@@ -1,274 +1,299 @@
 # FFEM LiDAR Mapping
 
-**Feedback-Foveated Elevation Mapping (FFEM)** is a research prototype scaffold for DRDO PS-26053: adaptive variable-resolution 2.5D LiDAR mapping for dynamic-environment perception.
+Feedback-Foveated Elevation Mapping (FFEM) for adaptive variable-resolution 2.5D LiDAR mapping in dynamic environments.
 
-The repository is intentionally organized as a staged robotics research codebase. The first milestone is a reproducible replay pipeline with a fixed-resolution 2.5D baseline and Rerun visualization. Adaptive horizontal cells, semantic uncertainty, dynamic-object likelihood, vertical slices, predictive dilation, and ROS 2 integration are added incrementally.
 
-## Installation without a virtual environment
+## Final native demo and validation
 
-The project supports Python 3.10 and newer. For a direct system installation, use the same interpreter for both pip and the demo:
+The final submission path is native Ubuntu + ROS 2 Humble + CARLA 0.9.16. Docker is optional and is not required for the demonstration.
 
-```bash
-python3 --version
-python3 -m pip install -e .
-```
-
-If Debian or Ubuntu reports an `externally-managed-environment` error, use the distribution override explicitly:
+Start CARLA with native ROS 2 support:
 
 ```bash
-python3 -m pip install --break-system-packages -e .
+cd ~/CARLA
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+./CarlaUE4.sh --ros2
 ```
 
-On systems where `python3` is Python 3.10, this resolves the package requirement. If the `rerun-sdk` wheel is unavailable for the platform, install the demo dependencies separately and run the smoke test without Rerun:
+Then start the CARLA native ROS 2 sensor bridge:
 
 ```bash
-python3 -m pip install --break-system-packages numpy pyyaml
-python3 scripts/run_replay.py --frames 10 --no-rerun
+cd ~/CARLA/PythonAPI/examples/ros2
+source /opt/ros/humble/setup.bash
+source ~/DRDO/sim/carla/native_env.sh
+~/CARLA/carla_env/bin/python3 ros2_native.py --host 127.0.0.1 --port 2000 --file stack.json --verbose
 ```
 
-## Architecture
+For a 6 GB RTX 3050 laptop, use `FFEM_DEVICE=auto`; the runtime falls back to CPU when free VRAM is below `FFEM_MIN_FREE_VRAM_MB`.
+
+```bash
+export FFEM_DEVICE=auto
+export FFEM_MIN_FREE_VRAM_MB=1024
+export FFEM_RVIZ=1
+export FFEM_OPEN3D=1
+```
+
+After capturing identical LiDAR frames, run the reproducible three-way comparison:
+
+```bash
+python3 scripts/benchmark_ps26053.py \
+  --frames-file outputs/memory_experiment_frames.npz \
+  --checkpoint models/checkpoints/semanticposs_range_model.pt \
+  --device cpu
+```
+
+The comparison reports mean/P50/P95 core latency, FPS, peak process RSS, active cells, and FFEM reductions relative to the uniform 5 cm baseline. Results are saved to `outputs/ps26053_comparison.json`.
+
+## Production candidate
+
+The `production-ready-ffem` branch is a hardened release candidate for the ROS 2 + native CARLA workflow. It includes a real PointCloud2 ingestion path, seven-class range-image semantic inference, scan-to-scan motion residuals, lightweight tracking, hierarchical four-way adaptive mapping, uncertainty/traversability/attention channels, closed-loop planning feedback, RViz2/Rerun/dashboard outputs, preflight checks, CI configuration, and an optional CARLA controller.
+
+This is not a safety-certified autonomous-driving system. The semantic checkpoint, held-out evaluation, long-duration performance measurements, and the CARLA TF convention still require acceptance testing on the target machine.
+
+## Design
 
 ```text
-LiDAR / rosbag replay
-        -> synchronization and pose transform
-        -> deskewing, filtering, ground separation
-        -> semantic segmentation + moving-object segmentation
-        -> object tracking and terrain-feature extraction
-        -> coarse 2.5D elevation map
-        -> attention score and budget controller
-        -> horizontal split/merge + vertical slice create/merge
-        -> traversability map, Rerun logging, metrics
+CARLA 0.9.16
+    -> native CARLA ROS2 LiDAR
+    -> /carla/hero/lidar/point_cloud
+    -> FFEM ROS2 node
+       -> range-image semantic inference
+       -> ego-motion compensated motion residuals
+       -> lightweight dynamic tracking
+       -> hierarchical 2.5D elevation fusion
+       -> uncertainty / traversability / attention
+       -> adaptive four-child refinement + hysteresis merge
+       -> risk-aware local planning
+       -> planning feedback into map criticality
+       -> final local path
+    -> RViz2 / Rerun / dashboard
+    -> optional CARLA controller
 ```
 
-## Repository map
+Each active map leaf stores elevation mean/variance, semantic probabilities, motion probability, traversability cost, attention, and planning criticality. Refinement is explicit 4-ary topology. Event history and active-cell capacity are bounded.
 
-- `src/ffem/io`: LiDAR, pose, rosbag, and synchronization interfaces.
-- `src/ffem/preprocessing`: deskewing, transforms, ground filtering, and outlier rejection.
-- `src/ffem/perception`: semantic, motion, tracking, velocity, and uncertainty backends.
-- `src/ffem/mapping`: fixed and adaptive 2.5D maps, hashing, fusion, continuity, and persistence.
-- `src/ffem/traversability`: terrain descriptors and cost-map computation.
-- `src/ffem/adaptation`: attention score, predictive dilation, hysteresis, and budget policy.
-- `src/ffem/visualization`: Rerun entities and optional visualization sinks.
-- `src/ffem/evaluation`: accuracy, calibration, dynamic, memory, and latency metrics.
-- `configs`: reproducible sensor, model, and experiment configurations.
-- `scripts`: replay, benchmarking, recording generation, and figure export entry points.
-- `tests`: unit, integration, and regression tests.
-
-## Development stages
-
-1. Build a synthetic or user-supplied LiDAR replay and log raw points, trajectory, and timing to Rerun.
-2. Implement the fixed-resolution elevation and traversability baseline.
-3. Add semantic probabilities and moving-object probability as map channels.
-4. Add budgeted adaptive horizontal cells with parent-child fusion and hysteresis.
-5. Add multimodal-height vertical slices and continuity-preserving split/merge.
-6. Add velocity-aware predictive dilation and compare against reactive refinement.
-7. Add real model backends and ROS 2/rosbag input.
-
-Do not claim research novelty from the scaffold alone. The experimental code must compare fixed-grid, geometry-adaptive, semantic-adaptive, and FFEM variants under identical replay and hardware conditions.
-
-## Rerun visualization entities
-
-The visualization layer should use stable paths including `world/lidar/raw`, `world/lidar/semantic`, `world/dynamics/moving_points`, `world/dynamics/tracks`, `world/map/elevation`, `world/map/uncertainty`, `world/map/traversability`, `world/map/adaptive_cells`, `world/map/vertical_slices`, `world/adaptation/refinement_events`, `world/robot/trajectory`, `metrics/latency`, and `metrics/memory`.
-
-## Data policy
-
-Large datasets and model checkpoints are excluded from Git. Place them under `data/raw/` and `models/checkpoints/` locally, and document download and licensing instructions in `docs/datasets.md`.
-
-## Git workflow
-
-Create a feature branch for each experiment or subsystem. Every commit should include tests or a reproducible example. Keep generated `.rrd` recordings and figures under `outputs/` locally unless a small artifact is intentionally selected for version control.
-
-## Current implementation status
-
-The repository now includes a runnable 70%-ready prototype core in `src/ffem/pipeline.py`. It provides deterministic synthetic LiDAR replay, semantic probability channels, moving-point probability, elevation mean/variance fusion, traversability cost, attention scoring, adaptive cell levels, temporal hysteresis, vertical slices for multimodal heights, topology-change limits, and metrics. The perception outputs are deliberately mock backends and must later be replaced with trained LiDAR models.
-
-Run the real-time Rerun demo directly on the system Python:
-
-```bash
-python3 -m pip install --break-system-packages -e .
-python3 scripts/run_replay.py --frames 300 --recording outputs/ffem_demo.rrd
-```
-
-Run a headless smoke test:
-
-```bash
-python3 scripts/run_replay.py --frames 100 --no-rerun
-python3 -m pytest tests/unit -q
-```
-
-The ROS 2 adapter is under `ros2/`. On a sourced ROS 2 installation, build it with:
-
-```bash
-cd ros2
-python3 -m pip install --break-system-packages -e .
-# or use colcon from the parent workspace:
-# colcon build --packages-select ffem_lidar_mapping
-# source install/setup.bash
-# ros2 launch ffem_lidar_mapping ffem.launch.py
-```
-
-The current ROS 2 callback is an integration adapter and uses the core pipeline; PointCloud2 decoding and publication should be completed in the next milestone. This keeps the research core testable on machines without ROS 2.
-
-## Integrated CARLA–ROS 2–FFEM–Rerun workflow
-
-The main integration path is now represented in the repository:
+## Resolution policy
 
 ```text
-CARLA -> CARLA ROS bridge -> PointCloud2 -> FFEM ROS 2 node -> TF transform -> FFEM map
-                                                   |-> RViz2 topics
-                                                   |-> optional Rerun logger -> .rrd
+0-8 m      : 0.05 m base resolution
+8-18 m     : 0.10 m base resolution
+18-40 m    : 0.25 m base resolution
+40-100 m   : 0.50 m base resolution
 ```
 
-The FFEM node now attempts a timestamped TF lookup from the LiDAR message frame into `map`, processes the actual decoded points, publishes elevation and moving-point clouds, publishes metrics and refinement events, and can optionally log the same data to Rerun. The standalone logger is useful when the mapper should remain independent of visualization.
+Attention and planning feedback can refine mapped cells below their radial base rate, subject to the global 0.05 m finest-cell floor and hierarchy depth.
 
-The CARLA integration assets are under `sim/carla/`. They include `config.yaml`, a synchronous scenario runner, and a complete run guide. The external CARLA server, CARLA Python API, official CARLA ROS bridge, ROS 2 distribution, and RViz2 remain environment dependencies and are not bundled in this repository.
-
-```bash
-# after CARLA and the official bridge are installed and sourced
-ros2 launch carla_ros_bridge carla_ros_bridge.launch.py synchronous_mode:=True fixed_delta_seconds:=0.05
-python3 sim/carla/run_scenario.py --map Town03 --vehicles 20 --ticks 1000
-ros2 launch ffem_lidar_mapping ffem_integrated.launch.py input_topic:=/carla/ego_vehicle/lidar map_frame:=map
-rviz2
-```
-
-For a real CARLA experiment, ordinary LiDAR must be used as the FFEM input. CARLA semantic LiDAR or actor state should be connected only to a separate evaluation node as ground truth; it must not replace the deployed perception input.
-
-## Integration limitations
-
-The integrated path is now connected at the transport and processing level, but model perception remains deterministic mock logic, the CARLA bridge is an external dependency, and the FFEM map output is currently encoded as XYZ point clouds rather than a custom semantic/elevation message. The next production milestone is real TF validation against the target LiDAR driver, a trained semantic/MOS adapter, object tracking, and ground-truth evaluation on CARLA scenarios.
-
-## Real semantic perception backend
-
-The repository now includes a sensor-aware range-image segmentation interface in `src/ffem/perception/segmentation.py`. It provides LiDAR spherical projection, nearest-return z-buffering, a seven-class label contract, a PyTorch range-image model adapter, and an explicit fallback backend for CI only. `src/ffem/io/semantic_kitti.py` loads SemanticKITTI `.bin` and `.label` files and remaps labels into the FFEM class set. `scripts/train_segmentation.py` trains and saves a checkpoint when PyTorch is available.
-
-Install the optional ML stack with:
-
-```bash
-python3 -m pip install --break-system-packages -e ".[ml,dev]"
-```
-
-Train on labeled scans:
-
-```bash
-python3 scripts/train_segmentation.py \
-  --data-root /absolute/path/to/SemanticKITTI \
-  --sequences 00 01 02 \
-  --epochs 20 \
-  --checkpoint models/checkpoints/range_segmentation.pt
-```
-
-Run a checkpoint in replay:
-
-```bash
-python3 scripts/run_replay.py \
-  --backend torch_range \
-  --checkpoint models/checkpoints/range_segmentation.pt \
-  --frames 300 \
-  --recording outputs/semantic_demo.rrd
-```
-
-Run the same backend in ROS 2:
-
-```bash
-ros2 run ffem_lidar_mapping ffem_node --ros-args \
-  -p model_backend:=torch_range \
-  -p checkpoint:=/absolute/path/range_segmentation.pt \
-  -p input_topic:=/carla/ego_vehicle/lidar \
-  -p map_frame:=map
-```
-
-The fallback backend remains available only so the repository can be tested without a dataset, GPU, or checkpoint. It must not be used for research accuracy claims.
-
-## Drop-in checkpoint workflow
-
-Place the trained checkpoint at:
+## Repository layout
 
 ```text
-models/checkpoints/semantic_model.pt
+src/ffem/                 ROS-independent FFEM core
+src/ffem/perception/      range projection + semantic backend
+src/ffem/mapping/         adaptive map components
+src/ffem/planning/        risk-aware local planner
+src/ffem/ros2/            ROS 2 adapter
+ros2/                     ament_python package + launch/RViz assets
+sim/carla/                native CARLA integration + controller
+scripts/                  replay, evaluation, benchmark, preflight
+tests/                    regression and architecture tests
+docs/                     production runbook and experiment protocol
+dashboard/                browser dashboard
 ```
 
-With the default `auto` backend, both replay and ROS 2 automatically discover the first `.pt` file in that directory. You can override discovery with `FFEM_CHECKPOINT=/absolute/path/model.pt` or an explicit `--checkpoint`/`checkpoint:=...` argument. If no checkpoint exists, the system prints that it is using the fallback backend; this mode is for smoke tests only.
+## Installation
+## Docker runtime
 
-Install the optional visualization stack:
+A headless production runtime is provided in docker/Dockerfile and docker-compose.yml. CARLA remains an external runtime dependency; the FFEM container uses host networking so it can consume the native CARLA ROS2 LiDAR topic.
 
 ```bash
-python3 -m pip install --break-system-packages -e ".[visual]"
+docker compose build
+docker compose up
 ```
 
-Run Open3D and Rerun together:
+The container expects models/checkpoints/semanticposs_range_model.pt and fails closed if it is missing. The default container profile is non-actuating, sensor-local, headless, and suitable for validating the ROS2 mapping stack before enabling TF or a controller.
+
+See docker/README.md for GPU pass-through, preflight, and health checks.
+
+
+Development/replay environment:
 
 ```bash
-python3 scripts/run_replay.py --frames 300 --open3d --recording outputs/ffem_demo.rrd
+cd ~/DRDO
+python3 -m pip install --break-system-packages -e ".[dev,ml]"
 ```
 
-Run with a discovered checkpoint:
+ROS 2 runtime environment:
 
 ```bash
-python3 scripts/run_replay.py --frames 300 --open3d --recording outputs/semantic_demo.rrd
+cd ~/DRDO
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select ffem_lidar_mapping
+source install/setup.bash
 ```
 
-Run CARLA/ROS 2 with automatic discovery:
+The ROS 2 package installs the core `ffem` Python modules with the ament package, so the live node does not depend on an accidental source-tree `PYTHONPATH`.
+
+## Semantic checkpoint
+
+Check the model before live use:
 
 ```bash
-ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
-  input_topic:=/carla/ego_vehicle/lidar \
-  map_frame:=map \
-  model_backend:=auto
-```
-
-The model checkpoint must match the compact range-image architecture and seven-class output contract currently defined in `src/ffem/perception/segmentation.py`. A checkpoint from another architecture cannot be loaded automatically unless a corresponding adapter is added.
-
-## Supplied SemanticPOSS checkpoint
-
-The repository includes `models/checkpoints/semanticposs_first_model.pt`, which was supplied by the project owner and verified against the current seven-class compact range-image architecture. Automatic checkpoint discovery selects it when the `auto` backend is used. The checkpoint metadata reports dataset `semanticposs`, seven classes, and the expected class names: unknown, ground, vegetation, structure, vehicle, person, and obstacle.
-
-Validate the included checkpoint without a dataset scan:
-
-```bash
-python3 scripts/inspect_checkpoint.py models/checkpoints/semanticposs_first_model.pt
+export FFEM_CHECKPOINT=/absolute/path/semanticposs_range_model.pt
+python3 scripts/inspect_checkpoint.py "$FFEM_CHECKPOINT"
 python3 scripts/test_checkpoint_synthetic.py
 ```
 
-Run a checkpoint-backed FFEM smoke test:
+`model_backend:=torch_range` requires a compatible checkpoint. `model_backend:=fallback` is explicitly for smoke tests only. The repository does not claim quantitative accuracy from fallback inference or synthetic checkpoint loading.
+
+The current model is a compact range-image network with depth + intensity input and seven FFEM output classes: unknown, ground, vegetation, structure, vehicle, person, obstacle.
+
+## Native CARLA demo
+
+Start CARLA 0.9.16 first, then:
 
 ```bash
-python3 scripts/run_replay.py --backend auto --frames 100 --no-rerun
+cd ~/DRDO
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+source sim/carla/native_env.sh
+export FFEM_CHECKPOINT=/absolute/path/semanticposs_range_model.pt
+./sim/carla/run_native_demo.sh
 ```
 
-This verifies model loading and inference integration. It is not a SemanticPOSS test-set accuracy result; those metrics require the original dataset and held-out labels.
-
-## Preferred trained checkpoint
-
-The preferred SemanticPOSS checkpoint is now:
+Safe defaults are non-actuating and sensor-local:
 
 ```text
-models/checkpoints/semanticposs_range_model.pt
+FFEM_USE_CARLA_TF=0
+FFEM_CONTROLLER=none
 ```
 
-Automatic discovery prioritizes this checkpoint over the earlier `semanticposs_first_model.pt`. Both checkpoints use the same verified seven-class compact range-image architecture, but the `semanticposs_range_model.pt` file should be used for the main demonstration.
+The script verifies the CARLA server, reuses or starts one native ROS 2 bridge, waits for the LiDAR publisher, launches the real semantic backend, and starts the visualization stack.
 
-## Evaluation and baseline evidence
+### Closed-loop CARLA demonstration
 
-Held-out SemanticPOSS evaluation is available through:
+Only after validating the CARLA-to-native-ROS coordinate convention for your exact native LiDAR configuration:
 
 ```bash
-python3 scripts/evaluate_segmentation.py \
-  --data-root /absolute/path/to/SemanticPOSS \
-  --sequences 08 09 \
-  --checkpoint models/checkpoints/semanticposs_range_model.pt \
-  --output outputs/semanticposs_eval.json
+FFEM_USE_CARLA_TF=1 FFEM_CONTROLLER=ffem ./sim/carla/run_native_demo.sh
 ```
 
-The report contains a confusion matrix, per-class IoU, mean IoU, overall accuracy, and accuracy by range bands. Use sequence IDs generated by `scripts/inspect_dataset.py` and do not evaluate on training sequences.
+The FFEM controller brakes on a stale/missing path and is a research demonstration controller, not a safety-rated vehicle controller.
 
-Replay performance and map-baseline comparison are available through:
+### Lower-cost live profile
 
 ```bash
-python3 scripts/benchmark_replay.py \
-  --backend auto \
-  --checkpoint models/checkpoints/semanticposs_range_model.pt \
-  --frames 300 \
-  --output outputs/replay_benchmark.json
+FFEM_RANGE_HEIGHT=16
+FFEM_RANGE_WIDTH=512
+FFEM_MAX_POINTS=12000
+FFEM_MAX_ACTIVE_CELLS=12000
+FFEM_MAX_TOPOLOGY_CHANGES=24
+FFEM_QUEUE_DEPTH=2
 ```
 
-The benchmark reports P50/P95 total and map latency, active-cell count, topology changes, and moving-point counts for `uniform_fine`, `uniform_coarse`, and `ffem` modes. For final PS 26053 evidence, repeat this benchmark on the target RTX 3050 machine with the actual CARLA or LiDAR stream and record GPU memory as well.
+## Direct ROS 2 launch
+
+```bash
+ros2 launch ffem_lidar_mapping ffem_integrated.launch.py \
+  input_topic:=/carla/hero/lidar/point_cloud \
+  map_frame:=lidar \
+  use_tf:=false \
+  model_backend:=torch_range \
+  checkpoint:="$FFEM_CHECKPOINT" \
+  range_height:=16 \
+  range_width:=512 \
+  max_points_per_frame:=12000 \
+  max_active_cells:=12000
+```
+
+For TF-aware dynamic compensation, use `map_frame:=map use_tf:=true` only after the TF convention has been validated.
+
+## ROS 2 topic contract
+
+```text
+/carla/hero/lidar/point_cloud
+/ffem_mapper/map/elevation
+/ffem_mapper/map/semantic
+/ffem_mapper/map/adaptive_cells
+/ffem_mapper/map/traversability
+/ffem_mapper/map/uncertainty
+/ffem_mapper/map/attention
+/ffem_mapper/map/moving_points
+/ffem_mapper/tracks
+/ffem_mapper/refinement_markers
+/ffem_mapper/metrics
+/ffem_mapper/planning/risk
+/ffem_mapper/planning/path
+/ffem_mapper/refinement_events
+```
+
+The native CARLA LiDAR publisher and FFEM subscriber both use BEST_EFFORT QoS. The semantic PointCloud2 carries RGB visualization plus the compact class ID in `intensity` for downstream tools.
+
+## Preflight
+
+```bash
+python3 scripts/preflight.py \
+  --checkpoint "$FFEM_CHECKPOINT" \
+  --require-checkpoint \
+  --check-carla \
+  --check-ffem
+```
+
+Useful live checks:
+
+```bash
+ros2 topic info -v /carla/hero/lidar/point_cloud
+ros2 topic hz /carla/hero/lidar/point_cloud
+ros2 node info /ffem_mapper
+ros2 topic hz /ffem_mapper/metrics
+ros2 topic echo /ffem_mapper/planning/risk --once
+ros2 topic echo /ffem_mapper/planning/path --once
+```
+
+Expected `/ffem_mapper` subscriptions include LiDAR and optional `/tf`/`/tf_static`. Expected publishers include all mapping, diagnostics, tracks, refinement, metrics, risk, and path topics above.
+
+
+
+### PS-26053 evidence suite
+Use the same freshly captured frame file for the controlled comparison and ablations:
+
+```bash
+python3 scripts/benchmark_ps26053.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/ablation_matrix.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/evaluate_carla_dynamic.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+python3 scripts/evaluate_carla_terrain.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+```
+These scripts report measured evidence only. SemanticPOSS still requires the local labeled dataset path.
+## Automated validation
+
+```bash
+python3 -m pytest -q
+python3 -m compileall -q src scripts tests
+ruff check src scripts tests
+```
+
+GitHub Actions runs the Python compile, Ruff, unit tests, and ROS 2 package metadata check. A green local run or GitHub run should be treated as a software-quality gate, not as field-performance evidence.
+
+Formal experiment entry points:
+
+```bash
+python3 scripts/evaluate_segmentation.py ...
+python3 scripts/evaluate_carla_generalization.py ...
+python3 scripts/benchmark_replay.py ...
+python3 scripts/benchmark_performance.py ...
+python3 scripts/evaluate_memory_savings.py ...
+python3 scripts/final_validation.py
+```
+
+Do not report semantic accuracy, CARLA generalization, FPS, or memory savings until the corresponding real experiment has produced JSON evidence. The memory experiment is a map-storage proxy, not whole-process RSS.
+
+## Motion and TF acceptance
+
+`VoxelMotionDetector` performs voxelized scan-to-scan residual matching and can consume a relative ego-motion transform. It is intentionally lightweight and should be treated as a research detector rather than a fully robust production multi-object motion system.
+
+The CARLA TF broadcaster publishes the actual LiDAR actor pose. Before enabling it for moving-vehicle compensation, validate translation direction and yaw sign against the native ROS 2 PointCloud2 frame using a controlled vehicle translation/rotation test. CARLA and ROS integration paths can use different coordinate conventions, so this acceptance test belongs in the deployment process.
+
+## Documentation
+
+- `docs/PRODUCTION_RUNBOOK.md` — installation, launch, health checks, failure diagnosis, and release gates.
+- `docs/FINAL_STACK.md` — end-to-end architecture and topic contract.
+- `docs/experiment_protocol.md` — required baselines, metrics, and scientific safeguards.

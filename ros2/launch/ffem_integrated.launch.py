@@ -17,6 +17,8 @@ def generate_launch_description():
     range_height = LaunchConfiguration('range_height')
     range_width = LaunchConfiguration('range_width')
     max_range = LaunchConfiguration('max_range')
+    device = LaunchConfiguration('device')
+    min_free_vram_mb = LaunchConfiguration('min_free_vram_mb')
     max_points_per_frame = LaunchConfiguration('max_points_per_frame')
     max_active_cells = LaunchConfiguration('max_active_cells')
     max_topology_changes = LaunchConfiguration('max_topology_changes')
@@ -44,6 +46,8 @@ def generate_launch_description():
             'range_height': range_height,
             'range_width': range_width,
             'max_range': max_range,
+            'device': device,
+            'min_free_vram_mb': min_free_vram_mb,
             'max_points_per_frame': max_points_per_frame,
             'max_active_cells': max_active_cells,
             'max_topology_changes': max_topology_changes,
@@ -63,7 +67,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('input_topic', default_value='/carla/hero/lidar/point_cloud'),
         DeclareLaunchArgument('map_frame', default_value='lidar'),
-        DeclareLaunchArgument('model_backend', default_value='auto'),
+        DeclareLaunchArgument('model_backend', default_value='torch_range'),
         DeclareLaunchArgument('checkpoint', default_value=''),
         DeclareLaunchArgument('use_tf', default_value='false'),
         DeclareLaunchArgument('enable_rerun', default_value='true'),
@@ -71,6 +75,8 @@ def generate_launch_description():
         DeclareLaunchArgument('range_height', default_value='32'),
         DeclareLaunchArgument('range_width', default_value='1024'),
         DeclareLaunchArgument('max_range', default_value='80.0'),
+        DeclareLaunchArgument('device', default_value='auto'),
+        DeclareLaunchArgument('min_free_vram_mb', default_value='1024'),
         DeclareLaunchArgument('max_points_per_frame', default_value='150000'),
         DeclareLaunchArgument('max_active_cells', default_value='20000'),
         DeclareLaunchArgument('max_topology_changes', default_value='32'),

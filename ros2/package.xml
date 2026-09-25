@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>ffem_lidar_mapping</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>Feedback-Foveated Elevation Mapping ROS 2 adapter with adaptive 2.5D diagnostics, planning risk, and RViz visualization.</description>
   <maintainer email="research@example.com">FFEM Research Team</maintainer>
   <license>Apache-2.0</license>

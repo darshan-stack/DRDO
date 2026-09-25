@@ -51,6 +51,8 @@ if ROS_AVAILABLE:
             self.declare_parameter("range_height", 32)
             self.declare_parameter("range_width", 1024)
             self.declare_parameter("max_range", 80.0)
+            self.declare_parameter("device", "auto")
+            self.declare_parameter("min_free_vram_mb", 1024)
             self.declare_parameter("base_cell_size", 1.0)
             self.declare_parameter("finest_cell_size", 0.25)
             self.declare_parameter("max_level", 2)
@@ -84,6 +86,8 @@ if ROS_AVAILABLE:
                 int(self.get_parameter("range_height").value),
                 int(self.get_parameter("range_width").value),
                 float(self.get_parameter("max_range").value),
+                str(self.get_parameter("device").value),
+                int(self.get_parameter("min_free_vram_mb").value),
             )
             self.pipeline = FFEMPipeline(cfg, segmenter=segmenter)
             self.planner = LocalRiskPlanner()
@@ -93,6 +97,7 @@ if ROS_AVAILABLE:
             self.use_tf = bool(self.get_parameter("use_tf").value)
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self)
+            self._previous_sensor_to_map = None
 
             qos = QoSProfile(depth=int(self.get_parameter("queue_depth").value), history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
             reliable_qos = QoSProfile(depth=5, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
@@ -118,7 +123,9 @@ if ROS_AVAILABLE:
             self.get_logger().info(
                 f"FFEM ready | input={self.get_parameter('input_topic').value} | backend={backend} | "
                 f"checkpoint={ckpt_text} | map_frame={self.map_frame} | TF={self.use_tf} | "
-                f"Rerun={self.rerun_enabled} | planner=local_risk | feedback=closed_loop | hierarchy=4ary"
+                f"Rerun={self.rerun_enabled} | device={getattr(segmenter, 'device', 'n/a')} | "
+                f"device_note={getattr(segmenter, 'device_note', 'n/a')} | "
+                f"planner=local_risk | feedback=closed_loop | hierarchy=4ary"
             )
 
         def _lookup(self, msg):
@@ -145,8 +152,25 @@ if ROS_AVAILABLE:
                 matrix = self._lookup(msg)
                 if matrix is None:
                     return
+                ego_transform = None
+                if self.use_tf:
+                    if self._previous_sensor_to_map is not None:
+                        try:
+                            ego_transform = np.linalg.inv(matrix) @ self._previous_sensor_to_map
+                        except np.linalg.LinAlgError:
+                            self.get_logger().warning(
+                                "Skipping frame: non-invertible sensor transform",
+                                throttle_duration_sec=5.0,
+                            )
+                            return
+                    self._previous_sensor_to_map = matrix.copy()
                 points = transform_points(points, matrix)
-                result = self.pipeline.process_points(points, intensity=intensity, frame=self.frame)
+                result = self.pipeline.process_points(
+                    points,
+                    intensity=intensity,
+                    frame=self.frame,
+                    ego_transform=ego_transform,
+                )
                 preliminary = self.planner.plan(self.pipeline.mapping)
                 feedback_changes = self.pipeline.mapping.apply_planning_feedback(preliminary["points"], preliminary["risk_profile"], self.frame)
                 final_plan = self.planner.plan(self.pipeline.mapping)
@@ -255,7 +279,15 @@ if ROS_AVAILABLE:
             cell_points, traversability, uncertainty, attention, cell_levels = self.pipeline.mapping.diagnostics()
             self.map_pub.publish(encode_pointcloud2(map_points, frame_id=self.map_frame, stamp=stamp, intensity=map_points[:, 2] if len(map_points) else None))
             labels = np.argmax(result["semantic_probs"], axis=1).astype(np.int32)
-            self.semantic_pub.publish(encode_pointcloud2(result["points"], frame_id=self.map_frame, stamp=stamp, rgb=self._semantic_rgb(labels)))
+            self.semantic_pub.publish(
+                encode_pointcloud2(
+                    result["points"],
+                    frame_id=self.map_frame,
+                    stamp=stamp,
+                    intensity=labels.astype(np.float32),
+                    rgb=self._semantic_rgb(labels),
+                )
+            )
             moving = result["points"][result["moving"]]
             moving_rgb = np.tile(np.array([[255, 45, 45]], dtype=np.uint8), (len(moving), 1))
             self.moving_pub.publish(encode_pointcloud2(moving, frame_id=self.map_frame, stamp=stamp, rgb=moving_rgb))
@@ -302,8 +334,19 @@ if ROS_AVAILABLE:
                 parent_cloud = np.column_stack([parent_points[:, 0], parent_points[:, 1], np.zeros(len(parent_points), dtype=np.float32)])
                 rr.log("world/map/hierarchy_parents", rr.Points3D(parent_cloud))
             if self.pipeline.mapping.events:
-                event_pts = np.array([[e["cell"][2], e["cell"][3], 0.05] for e in self.pipeline.mapping.events[-20:]], dtype=np.float32)
-                rr.log("world/adaptation/refinement_events", rr.Points3D(event_pts, radii=0.08))
+                event_points = []
+                for event in self.pipeline.mapping.events[-20:]:
+                    band, _, ix, iy = event["cell"]
+                    level = int(event["new_level"])
+                    size = float(self.pipeline.mapping._sizes[int(band)]) / (2 ** level)
+                    event_points.append(
+                        [(ix + 0.5) * size, (iy + 0.5) * size, 0.05]
+                    )
+                if event_points:
+                    rr.log(
+                        "world/adaptation/refinement_events",
+                        rr.Points3D(np.asarray(event_points, dtype=np.float32), radii=0.08),
+                    )
             rr.log("world/planning/local_path", rr.LineStrips2D([plan["points"]]))
             rr.log("metrics/latency/total_ms", rr.Scalars([stats["total_ms"]]))
             rr.log("metrics/latency/map_ms", rr.Scalars([stats["map_ms"]]))

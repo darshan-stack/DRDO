@@ -276,16 +276,6 @@ def main():
             if actor.is_alive:
                 actor.destroy()
 
-    metrics = binary_precision_recall(
-        np.asarray(
-            [row["predicted_moving_points"] > 0 for row in frame_rows],
-            dtype=bool,
-        ),
-        np.asarray(
-            [row["ground_truth_moving_points"] > 0 for row in frame_rows],
-            dtype=bool,
-        ),
-    )
     continuity = float(
         np.mean(np.asarray(joint_hit, dtype=np.float32))
     ) if joint_hit else 0.0

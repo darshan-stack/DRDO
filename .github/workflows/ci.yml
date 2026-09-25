@@ -18,7 +18,7 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q src scripts tests
       - name: Ruff
-        run: ruff check src scripts tests
+        run: ruff check src scripts tests --select E4,E7,E9,F
       - name: Unit tests
         run: pytest -q
       - name: ROS2 package metadata

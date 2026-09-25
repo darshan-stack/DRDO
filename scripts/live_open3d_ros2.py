@@ -110,7 +110,7 @@ class LiveViewer(Node):
         self.get_logger().info(
             f"Open3D viewer | raw={raw_topic} semantic={semantic_topic} "
             f"moving={moving_topic} max_points={max_points} max_hz={max_hz} "
-            f"software_rendering={os.environ.get(\"LIBGL_ALWAYS_SOFTWARE\", \"0\")}"
+            f"software_rendering={os.environ.get('LIBGL_ALWAYS_SOFTWARE', '0')}"
         )
 
     @staticmethod

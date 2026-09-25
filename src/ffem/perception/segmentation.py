@@ -146,6 +146,7 @@ class TorchRangeSegmenter(SemanticSegmenter):
         projection: ProjectionConfig | None = None,
         num_classes: int = 7,
         device: str = "auto",
+        min_free_vram_mb: int = 1024,
     ):
         try:
             import torch
@@ -156,13 +157,41 @@ class TorchRangeSegmenter(SemanticSegmenter):
         self.torch = torch
         self.projector = RangeImageProjector(projection)
         self.num_classes = int(num_classes)
-        self.device = (
-            "cuda"
-            if device == "auto" and torch.cuda.is_available()
-            else device
-            if device != "auto"
-            else "cpu"
-        )
+        requested_device = str(device).strip().lower()
+        if requested_device not in {"auto", "cpu", "cuda"}:
+            raise ValueError("device must be one of: auto, cpu, cuda")
+        self.requested_device = requested_device
+        self.min_free_vram_mb = int(min_free_vram_mb)
+        self.device = "cuda" if requested_device == "auto" and torch.cuda.is_available() else requested_device
+        if self.device == "auto":
+            self.device = "cpu"
+        self.device_note = "configured"
+        if requested_device == "auto" and self.device == "cuda":
+            try:
+                free_bytes, _ = torch.cuda.mem_get_info()
+                free_mb = free_bytes / (1024 ** 2)
+                if free_mb < self.min_free_vram_mb:
+                    self.device = "cpu"
+                    self.device_note = (
+                        f"auto-selected CPU because only {free_mb:.0f} MiB VRAM was free "
+                        f"(< {self.min_free_vram_mb} MiB threshold)"
+                    )
+            except Exception as exc:
+                self.device_note = f"VRAM check unavailable: {exc}"
+        elif self.device == "cuda":
+            try:
+                free_bytes, _ = torch.cuda.mem_get_info()
+                free_mb = free_bytes / (1024 ** 2)
+                if free_mb < self.min_free_vram_mb:
+                    raise RuntimeError(
+                        f"CUDA requested but only {free_mb:.0f} MiB VRAM is free; "
+                        f"need at least {self.min_free_vram_mb} MiB. "
+                        "Close GPU-heavy applications or use device:=cpu/auto."
+                    )
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                self.device_note = f"VRAM check unavailable: {exc}"
 
         if self.device == "cpu":
             try:

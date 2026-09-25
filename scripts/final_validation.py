@@ -63,6 +63,8 @@ def main():
     ap.add_argument("--ablation", default="outputs/ps26053_ablation_matrix.json")
     ap.add_argument("--dynamic", default="outputs/dynamic_scene_metrics.json")
     ap.add_argument("--terrain", default="outputs/elevation_traversability_metrics.json")
+    ap.add_argument("--projection", default="outputs/projection_invariants.json")
+    ap.add_argument("--stability", default="outputs/long_duration_stability.json")
     ap.add_argument("--output", default="outputs/final_validation_report.json")
     args = ap.parse_args()
 
@@ -88,6 +90,8 @@ def main():
         ("ablation", args.ablation),
         ("dynamic", args.dynamic),
         ("terrain", args.terrain),
+        ("projection", args.projection),
+        ("stability", args.stability),
     ):
         data = load_json(Path(path_str))
         report["evidence"][name] = data if data is not None else {"status": "not_run", "path": path_str}

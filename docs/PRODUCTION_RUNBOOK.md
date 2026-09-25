@@ -256,6 +256,18 @@ ros2 topic echo /ffem_mapper/planning/path --once
 
 The path follower accepts both robot-local paths and map/world-frame paths. In map mode it transforms the target into the current CARLA vehicle frame before calculating steering.
 
+
+
+### PS-26053 extended validation
+After generating a fresh `outputs/memory_experiment_frames.npz`, run:
+
+```bash
+python3 scripts/benchmark_ps26053.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/ablation_matrix.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/evaluate_carla_dynamic.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+python3 scripts/evaluate_carla_terrain.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+```
+The dynamic and terrain evaluators use synchronized CARLA semantic LiDAR ground truth. They must be run with a live CARLA server.
 ## Quantitative validation
 
 Never report unmeasured accuracy or memory numbers. The repository provides:

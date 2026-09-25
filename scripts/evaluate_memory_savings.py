@@ -99,8 +99,8 @@ def main() -> None:
     )
     ap.add_argument("--cell-bytes", type=int, default=64)
     ap.add_argument("--output", default="outputs/memory_savings.json")
-    ap.add_argument("    ap.add_argument("--save-frames", default="outputs/memory_experiment_frames.npz")
-", default="outputs/memory_experiment_frames.npz")
+    ap.add_argument("--save-frames", default="outputs/memory_experiment_frames.npz")
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     args = ap.parse_args()
 
     if args.frames < 2:

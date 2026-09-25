@@ -84,7 +84,7 @@ def check_topic(topic: str, failures: list[str]) -> None:
     ros2 = shutil.which("ros2")
     if ros2 is None:
         return
-    rc, output = run(["ros2", "topic", "info", "-v", topic])
+    rc, output = run(["ros2", "topic", "info", "--no-daemon", "-v", topic])
     require(
         rc == 0 and "Publisher count:" in output,
         f"ROS2 topic exists: {topic}",

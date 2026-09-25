@@ -166,6 +166,11 @@ class TorchRangeSegmenter(SemanticSegmenter):
         if self.device == "auto":
             self.device = "cpu"
         self.device_note = "configured"
+        if self.device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA was requested but PyTorch reports no CUDA device. "
+                "Use device:=auto or device:=cpu."
+            )
         if requested_device == "auto" and self.device == "cuda":
             try:
                 free_bytes, _ = torch.cuda.mem_get_info()

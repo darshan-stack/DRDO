@@ -8,6 +8,7 @@ required dependency is missing.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -110,7 +111,7 @@ def check_checkpoint(path: str | None, required: bool, failures: list[str]) -> N
             require(False, f"PyTorch import succeeds ({exc})", failures)
 
 
-def check_carla(host: str, port: int, failures: list[str]) -> None:
+def check_carla(host: str, port: int, carla_python: str, failures: list[str]) -> None:
     """Probe CARLA in a child process so a native client abort cannot kill preflight."""
     code = r'''
 import carla
@@ -134,8 +135,12 @@ hero = next(
 print("CARLA_HERO=" + ("1" if hero is not None else "0"))
 '''
     try:
+        python_exe = Path(carla_python).expanduser()
+        if not python_exe.is_file():
+            require(False, f"CARLA Python exists: {python_exe}", failures)
+            return
         proc = subprocess.run(
-            [sys.executable, "-c", code, host, str(port)],
+            [str(python_exe), "-c", code, host, str(port)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -181,6 +186,11 @@ def main() -> int:
     parser.add_argument("--carla-host", default="127.0.0.1")
     parser.add_argument("--carla-port", type=int, default=2000)
     parser.add_argument(
+        "--carla-python",
+        default=os.environ.get("CARLA_PY", str(Path.home() / "CARLA/carla_env/bin/python3")),
+        help="Python interpreter from the CARLA environment matching the running simulator.",
+    )
+    parser.add_argument(
         "--topic",
         default="/carla/hero/lidar/point_cloud",
     )
@@ -194,7 +204,7 @@ def main() -> int:
     check_checkpoint(args.checkpoint, args.require_checkpoint, failures)
 
     if args.check_carla:
-        check_carla(args.carla_host, args.carla_port, failures)
+        check_carla(args.carla_host, args.carla_port, args.carla_python, failures)
         check_topic(args.topic, failures)
     if args.check_ffem:
         rc, output = run(["ros2", "node", "info", "/ffem_mapper"])

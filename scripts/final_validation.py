@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--carla-eval", default="outputs/carla_generalization.json")
     ap.add_argument("--performance", default="outputs/performance_benchmark.json")
     ap.add_argument("--memory", default="outputs/memory_savings.json")
+    ap.add_argument("--comparison", default="outputs/ps26053_comparison.json")
     ap.add_argument("--output", default="outputs/final_validation_report.json")
     args = ap.parse_args()
 
@@ -78,6 +79,7 @@ def main():
         ("carla_generalization", args.carla_eval),
         ("performance", args.performance),
         ("memory", args.memory),
+        ("comparison", args.comparison),
     ):
         data = load_json(Path(path_str))
         report["evidence"][name] = data if data is not None else {"status": "not_run", "path": path_str}

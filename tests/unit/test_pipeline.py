@@ -1,5 +1,5 @@
 import numpy as np
-from ffem.pipeline import FFEMConfig, AdaptiveElevationMap, FFEMPipeline
+from ffem.pipeline import FFEMConfig, FFEMPipeline
 
 def test_pipeline_step_returns_expected_channels():
     result = FFEMPipeline(FFEMConfig(max_topology_changes=4), seed=2).step(0)

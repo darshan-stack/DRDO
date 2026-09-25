@@ -48,3 +48,25 @@ def test_merge_requires_four_quiet_siblings():
     assert mapping._merge(root) is True
     assert root_id in mapping.leaves
     assert len(root.children) == 0
+
+
+def test_predictive_planning_dilation_is_bounded():
+    cfg = FFEMConfig(
+        max_level=1,
+        refine_threshold=0.20,
+        planning_weight=0.20,
+        predictive_dilation_frames=2,
+        predictive_dilation_radius_m=1.0,
+    )
+    mapping = AdaptiveElevationMap(cfg)
+    for x in (2.0, 3.0, 4.0):
+        mapping._ensure_root(x, 0.0)
+    roots_before = len(mapping.nodes)
+    changes = mapping.apply_planning_feedback(
+        np.array([[3.0, 0.0]], dtype=np.float32),
+        np.array([1.0], dtype=np.float32),
+        frame=1,
+    )
+    assert changes >= 1
+    assert len(mapping.nodes) >= roots_before
+    assert len(mapping._planning_forecast) <= 5

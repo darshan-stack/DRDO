@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 import numpy as np
@@ -16,6 +17,9 @@ except ImportError as exc:
     raise SystemExit(
         "ROS 2 Python packages are not available; source /opt/ros/humble/setup.bash"
     ) from exc
+
+if os.environ.get("FFEM_OPEN3D_SOFTWARE_RENDERING", "1") == "1":
+    os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
 
 try:
     import open3d as o3d
@@ -105,7 +109,8 @@ class LiveViewer(Node):
 
         self.get_logger().info(
             f"Open3D viewer | raw={raw_topic} semantic={semantic_topic} "
-            f"moving={moving_topic} max_points={max_points} max_hz={max_hz}"
+            f"moving={moving_topic} max_points={max_points} max_hz={max_hz} "
+            f"software_rendering={os.environ.get(\"LIBGL_ALWAYS_SOFTWARE\", \"0\")}"
         )
 
     @staticmethod
@@ -231,7 +236,14 @@ def main() -> None:
     parser.add_argument("--moving-topic", default="/ffem_mapper/map/moving_points")
     parser.add_argument("--max-points", type=int, default=12000)
     parser.add_argument("--max-hz", type=float, default=5.0)
+    parser.add_argument(
+        "--software-rendering",
+        action="store_true",
+        help="Force Mesa/llvmpipe software OpenGL before importing Open3D.",
+    )
     args = parser.parse_args()
+    if args.software_rendering:
+        os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
     rclpy.init()
     viewer = LiveViewer(

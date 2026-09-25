@@ -111,28 +111,62 @@ def check_checkpoint(path: str | None, required: bool, failures: list[str]) -> N
 
 
 def check_carla(host: str, port: int, failures: list[str]) -> None:
+    """Probe CARLA in a child process so a native client abort cannot kill preflight."""
+    code = r'''
+import carla
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+client = carla.Client(host, port)
+client.set_timeout(5.0)
+world = client.get_world()
+print("CARLA_SERVER=" + client.get_server_version())
+print("CARLA_MAP=" + world.get_map().name)
+hero = next(
+    (
+        actor
+        for actor in world.get_actors().filter("vehicle.*")
+        if actor.attributes.get("role_name") == "hero"
+    ),
+    None,
+)
+print("CARLA_HERO=" + ("1" if hero is not None else "0"))
+'''
     try:
-        import carla
-    except Exception as exc:
-        require(False, f"CARLA Python API import succeeds ({exc})", failures)
-        return
-    try:
-        client = carla.Client(host, port)
-        client.set_timeout(5.0)
-        world = client.get_world()
-        version = client.get_server_version()
-        print(f"[PASS] CARLA connection: {version} | map={world.get_map().name}")
-        hero = next(
-            (
-                actor
-                for actor in world.get_actors().filter("vehicle.*")
-                if actor.attributes.get("role_name") == "hero"
-            ),
-            None,
+        proc = subprocess.run(
+            [sys.executable, "-c", code, host, str(port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10.0,
+            check=False,
         )
-        require(hero is not None, "CARLA hero vehicle exists", failures)
-    except Exception as exc:
-        require(False, f"CARLA connection succeeds ({exc})", failures)
+    except subprocess.TimeoutExpired:
+        require(False, "CARLA connection responds within 10 seconds", failures)
+        return
+
+    output = proc.stdout.strip()
+    if proc.returncode != 0:
+        require(False, f"CARLA client probe exits cleanly (code={proc.returncode})", failures)
+        if output:
+            print(output[-2000:])
+        return
+
+    values = {}
+    for line in output.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+
+    server = values.get("CARLA_SERVER", "unknown")
+    carla_map = values.get("CARLA_MAP", "unknown")
+    print(f"[PASS] CARLA connection: server={server} | map={carla_map}")
+    require(
+        values.get("CARLA_HERO") == "1",
+        "CARLA hero vehicle exists",
+        failures,
+    )
 
 
 def main() -> int:

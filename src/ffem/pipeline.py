@@ -26,6 +26,7 @@ class FFEMConfig:
     max_active_cells: int = 20_000
     max_topology_changes: int = 32
     predictive_dilation_frames: int = 2
+    predictive_dilation_radius_m: float = 1.0
     semantic_weight: float = 0.27
     motion_weight: float = 0.27
     traversability_weight: float = 0.18
@@ -144,6 +145,7 @@ class AdaptiveElevationMap:
         self._sizes = np.asarray(
             [b.cell_size_m for b in self.radial.bands], dtype=np.float32
         )
+        self._planning_forecast: dict[tuple[int, int, int, int], tuple[float, int]] = {}
 
     def _record_event(self, event: dict[str, Any]) -> None:
         self.events.append(event)
@@ -382,6 +384,20 @@ class AdaptiveElevationMap:
                 "topology_changes": 0,
                 "hierarchy_nodes": len(self.nodes),
             }
+
+        if self._planning_forecast:
+            next_forecast: dict[tuple[int, int, int, int], tuple[float, int]] = {}
+            for node_id, (risk, remaining) in self._planning_forecast.items():
+                if remaining <= 0:
+                    continue
+                node = self.nodes.get(node_id)
+                if node is not None and node.active:
+                    node.planning_criticality = float(
+                        np.clip(max(node.planning_criticality, risk), 0.0, 1.0)
+                    )
+                if remaining > 1:
+                    next_forecast[node_id] = (risk, remaining - 1)
+            self._planning_forecast = next_forecast
 
         leaf_ids = [
             self.locate_leaf(float(x), float(y))

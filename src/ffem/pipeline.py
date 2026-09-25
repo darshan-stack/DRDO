@@ -573,42 +573,77 @@ class AdaptiveElevationMap:
             else np.empty((0,), dtype=np.float32)
         )
         changes = 0
+        horizon = max(0, int(self.cfg.predictive_dilation_frames))
+        radius = max(0.0, float(self.cfg.predictive_dilation_radius_m))
+
         for (x, y), risk in zip(points, risks):
             node_id = self.peek_leaf(float(x), float(y))
             if node_id is None:
                 continue
-            node = self.nodes[node_id]
-            node.planning_criticality = float(
-                np.clip(max(node.planning_criticality, float(risk)), 0.0, 1.0)
-            )
-            node.attention = float(
-                np.clip(
-                    node.attention
-                    + self.cfg.planning_weight * node.planning_criticality,
-                    0.0,
-                    1.0,
+
+            candidate_ids = {node_id}
+            if horizon > 0 and radius > 0.0:
+                for dx, dy in (
+                    (-radius, 0.0),
+                    (radius, 0.0),
+                    (0.0, -radius),
+                    (0.0, radius),
+                ):
+                    neighbor = self.peek_leaf(float(x + dx), float(y + dy))
+                    if neighbor is not None:
+                        candidate_ids.add(neighbor)
+
+            for candidate_id in candidate_ids:
+                old_risk, old_horizon = self._planning_forecast.get(
+                    candidate_id, (0.0, 0)
                 )
-            )
-            if (
-                node.level < self.cfg.max_level
-                and node.attention >= self.cfg.refine_threshold
-                and changes < self.cfg.max_topology_changes
-            ):
-                old_level = node.level
-                if self._split(node):
-                    self._record_event(
-                        {
-                            "frame": frame,
-                            "cell": node.node_id,
-                            "old_level": old_level,
-                            "new_level": old_level + 1,
-                            "reason": "planning_feedback",
-                            "score": node.attention,
-                            "hierarchy": "split_4",
-                            "parent": node.node_id,
-                        }
+                if horizon > 0:
+                    self._planning_forecast[candidate_id] = (
+                        max(float(risk), old_risk),
+                        max(horizon, old_horizon),
                     )
-                    changes += 1
+
+                node = self.nodes.get(candidate_id)
+                if node is None or not node.active:
+                    continue
+
+                node.planning_criticality = float(
+                    np.clip(
+                        max(node.planning_criticality, float(risk)),
+                        0.0,
+                        1.0,
+                    )
+                )
+                node.attention = float(
+                    np.clip(
+                        node.attention
+                        + self.cfg.planning_weight * node.planning_criticality,
+                        0.0,
+                        1.0,
+                    )
+                )
+
+                if (
+                    node.level < self.cfg.max_level
+                    and node.attention >= self.cfg.refine_threshold
+                    and changes < self.cfg.max_topology_changes
+                ):
+                    old_level = node.level
+                    if self._split(node):
+                        self._record_event(
+                            {
+                                "frame": frame,
+                                "cell": node.node_id,
+                                "old_level": old_level,
+                                "new_level": old_level + 1,
+                                "reason": "planning_feedback",
+                                "score": node.attention,
+                                "hierarchy": "split_4",
+                                "parent": node.node_id,
+                            }
+                        )
+                        changes += 1
+
         self._enforce_capacity()
         self.cells = {node_id: self.nodes[node_id] for node_id in self.leaves}
         return changes

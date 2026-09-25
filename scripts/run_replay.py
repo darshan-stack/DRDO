@@ -15,7 +15,7 @@ except ImportError:
 
 def log_frame(result: dict, pipeline: FFEMPipeline, frame: int) -> None:
     if rr is None: return
-    points, moving, probs, stats = result['points'], result['moving'], result['semantic_probs'], result['stats']
+    points, moving, stats = result['points'], result['moving'], result['stats']
     map_points, map_colors, levels = pipeline.mapping.arrays()
     rr.set_time('frame', sequence=frame)
     colors = np.zeros((len(points), 3), dtype=np.uint8); colors[:] = [80, 140, 220]; colors[moving] = [235, 65, 55]

@@ -64,7 +64,7 @@ def main():
         if sem_bp.has_attribute(k): sem_bp.set_attribute(k,v)
     raw_sensor=world.spawn_actor(raw_bp,carla.Transform(carla.Location(z=2.4)),attach_to=hero)
     sem_sensor=world.spawn_actor(sem_bp,carla.Transform(carla.Location(z=2.4)),attach_to=hero)
-    raw_box={}; sem_box={}; cm=np.zeros((7,7),np.int64); matched=raw_total=0; frames=0; start=time.time(); segmenter,_=build_segmenter('torch_range',args.checkpoint,7,device=args.device)
+    raw_box={}; sem_box={}; cm=np.zeros((7,7),np.int64); matched=raw_total=0; frames=0; segmenter,_=build_segmenter('torch_range',args.checkpoint,7,device=args.device)
     def raw_cb(m): raw_box[int(m.frame)]=m
     def sem_cb(m): sem_box[int(m.frame)]=m
     raw_sensor.listen(raw_cb); sem_sensor.listen(sem_cb)
@@ -82,7 +82,7 @@ def main():
                 # Voxel association: majority semantic tag per voxel.
                 keys=np.floor(sp/args.voxel).astype(np.int64); vox={}
                 for q,t in zip(keys,stag): vox.setdefault(tuple(q.tolist()),[]).append(int(t))
-                gt=[]; pred=[]
+                gt=[]
                 for point,intv in zip(rp,inten):
                     vals=vox.get(tuple(np.floor(point/args.voxel).astype(np.int64).tolist()))
                     if not vals: continue

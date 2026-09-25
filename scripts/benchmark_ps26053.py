@@ -118,8 +118,9 @@ def worker(args) -> None:
 
     pipe.reset()
 
-    if hasattr(pipe.segmenter, "torch") and getattr(pipe.segmenter, "device", "") == "cuda":
-        pipe.segmenter.torch.cuda.reset_peak_memory_stats()
+    segmenter = getattr(pipe, "perception", None)
+    if hasattr(segmenter, "torch") and getattr(segmenter, "device", "") == "cuda":
+        segmenter.torch.cuda.reset_peak_memory_stats()
 
     latencies = []
     map_latencies = []
@@ -141,16 +142,16 @@ def worker(args) -> None:
 
     rss_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     peak_gpu_mib = None
-    if hasattr(pipe.segmenter, "torch") and getattr(pipe.segmenter, "device", "") == "cuda":
+    if hasattr(segmenter, "torch") and getattr(segmenter, "device", "") == "cuda":
         peak_gpu_mib = float(
-            pipe.segmenter.torch.cuda.max_memory_allocated() / (1024 ** 2)
+            segmenter.torch.cuda.max_memory_allocated() / (1024 ** 2)
         )
 
     result = {
         "mode": args.mode,
         "frames": len(frames),
         "checkpoint": selected,
-        "device": getattr(pipe.segmenter, "device", args.device),
+        "device": getattr(segmenter, "device", args.device),
         "mean_points": statistics.fmean(point_counts),
         "mean_latency_ms": statistics.fmean(latencies),
         "p50_latency_ms": statistics.median(latencies),

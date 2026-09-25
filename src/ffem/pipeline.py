@@ -391,9 +391,22 @@ class AdaptiveElevationMap:
                 if remaining <= 0:
                     continue
                 node = self.nodes.get(node_id)
-                if node is not None and node.active:
-                    node.planning_criticality = float(
-                        np.clip(max(node.planning_criticality, risk), 0.0, 1.0)
+                targets = (
+                    [node]
+                    if node is not None and node.active
+                    else [
+                        self.nodes[child_id]
+                        for child_id in (node.children if node is not None else ())
+                        if child_id in self.nodes and self.nodes[child_id].active
+                    ]
+                )
+                for target in targets:
+                    target.planning_criticality = float(
+                        np.clip(
+                            max(target.planning_criticality, risk),
+                            0.0,
+                            1.0,
+                        )
                     )
                 if remaining > 1:
                     next_forecast[node_id] = (risk, remaining - 1)

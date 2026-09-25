@@ -251,6 +251,18 @@ ros2 topic echo /ffem_mapper/planning/path --once
 
 Expected `/ffem_mapper` subscriptions include LiDAR and optional `/tf`/`/tf_static`. Expected publishers include all mapping, diagnostics, tracks, refinement, metrics, risk, and path topics above.
 
+
+
+### PS-26053 evidence suite
+Use the same freshly captured frame file for the controlled comparison and ablations:
+
+```bash
+python3 scripts/benchmark_ps26053.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/ablation_matrix.py --frames-file outputs/memory_experiment_frames.npz --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --max-points 6000 --range-height 16 --range-width 512 --device cpu
+python3 scripts/evaluate_carla_dynamic.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+python3 scripts/evaluate_carla_terrain.py --checkpoint models/checkpoints/semanticposs_range_model.pt --frames 100 --device cpu
+```
+These scripts report measured evidence only. SemanticPOSS still requires the local labeled dataset path.
 ## Automated validation
 
 ```bash

@@ -30,7 +30,8 @@ def main() -> None:
     ap.add_argument("--max-range", type=float, default=80.0)
     ap.add_argument("--max-active-cells", type=int, default=12000)
     ap.add_argument("--warmup", type=int, default=5)
-    ap.add_argument("--output", default="outputs/performance_benchmark.json")
+    ap.add_argument("    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+", default="outputs/performance_benchmark.json")
     args = ap.parse_args()
 
     data = np.load(args.frames_file, allow_pickle=True)
@@ -47,6 +48,7 @@ def main() -> None:
         args.range_height,
         args.range_width,
         args.max_range,
+        device=args.device,
     )
     pipeline = FFEMPipeline(
         config=FFEMConfig(max_active_cells=args.max_active_cells),

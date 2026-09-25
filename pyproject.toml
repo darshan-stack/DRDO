@@ -25,3 +25,6 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 extend-exclude = ["build", "install", "log"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
